@@ -1,9 +1,10 @@
 // src/services/roundservice.js
 
 import { supabase } from "./supabase";
+import { trackEvent, EVENTS } from "./analytics";
 
 /**
- * Create a new round record in Supabase.
+ * Create a new round record in Supabase with analytics tracking.
  * 
  * @param {string} profile_id - The current user's profile ID.
  * @param {string} course_id - The ID of the course.
@@ -12,32 +13,55 @@ import { supabase } from "./supabase";
  * @returns {object} The newly created round record.
  */
 export const createRound = async (profile_id, course_id, tee_id, tee_name) => {
-  console.log("[createRound] Attempting to create a new round", { 
-    profile_id, 
-    course_id,
-    tee_id,
-    tee_name
-  });
+  const startTime = Date.now();
   
-  // Insert a new round record into the rounds table
-  const { data, error } = await supabase
-    .from("rounds")
-    .insert({
+  try {
+    const { data, error } = await supabase
+      .from("rounds")
+      .insert({
+        profile_id,
+        course_id,
+        is_complete: false,
+        selected_tee_id: tee_id,
+        selected_tee_name: tee_name
+      })
+      .select();
+
+    const duration = Date.now() - startTime;
+
+    if (error) {
+      trackEvent(EVENTS.ROUND_ENTITY_CREATED, {
+        success: false,
+        error_code: error.code,
+        error_message: error.message,
+        profile_id,
+        course_id, 
+        tee_id,
+        operation_duration_ms: duration
+      });
+      
+      console.error("[createRound] Error creating round:", error);
+      throw error;
+    }
+
+    const createdRound = data[0];
+    
+    trackEvent(EVENTS.ROUND_ENTITY_CREATED, {
+      success: true,
+      round_id: createdRound.id,
       profile_id,
       course_id,
-      is_complete: false, // New round is not complete
-      selected_tee_id: tee_id,
-      selected_tee_name: tee_name
-    })
-    .select(); // Returns the inserted record(s)
+      tee_id,
+      tee_name,
+      created_at: createdRound.created_at,
+      operation_duration_ms: duration
+    });
 
-  if (error) {
+    return createdRound;
+  } catch (error) {
     console.error("[createRound] Error creating round:", error);
     throw error;
   }
-
-  console.log("[createRound] Round created successfully:", data[0]);
-  return data[0]; // Return the newly created round record
 };
 
 /**
@@ -53,10 +77,9 @@ export const createRound = async (profile_id, course_id, tee_id, tee_name) => {
  * @returns {object} The saved record
  */
 export const saveHoleData = async (round_id, hole_number, hole_data, total_score) => {
-  console.log("[saveHoleData] Saving data for hole", hole_number, "in round", round_id);
+  const startTime = Date.now();
   
   try {
-    // Upsert the hole data (insert if not exists, update if exists)
     const { data, error } = await supabase
       .from("shots")
       .upsert({
@@ -65,16 +88,34 @@ export const saveHoleData = async (round_id, hole_number, hole_data, total_score
         hole_data,
         total_score
       }, {
-        onConflict: 'round_id,hole_number', // Handle the unique constraint
-        returning: 'representation' // Return the full record
+        onConflict: 'round_id,hole_number',
+        returning: 'representation'
       });
     
+    const duration = Date.now() - startTime;
+
     if (error) {
+      trackEvent(EVENTS.HOLE_DATA_SAVED, {
+        success: false,
+        error_code: error.code,
+        error_message: error.message,
+        round_id,
+        hole_number,
+        operation_duration_ms: duration
+      });
+      
       console.error("[saveHoleData] Error saving hole data:", error);
       throw error;
     }
     
-    console.log("[saveHoleData] Hole data saved successfully:", data);
+    trackEvent(EVENTS.HOLE_DATA_SAVED, {
+      success: true,
+      round_id,
+      hole_number,
+      total_score,
+      operation_duration_ms: duration
+    });
+    
     return data;
   } catch (error) {
     console.error("[saveHoleData] Exception in saveHoleData:", error);
@@ -89,7 +130,7 @@ export const saveHoleData = async (round_id, hole_number, hole_data, total_score
  * @returns {Array} Array of hole data records
  */
 export const getRoundHoleData = async (round_id) => {
-  console.log("[getRoundHoleData] Getting hole data for round", round_id);
+  const startTime = Date.now();
   
   try {
     const { data, error } = await supabase
@@ -98,12 +139,28 @@ export const getRoundHoleData = async (round_id) => {
       .eq("round_id", round_id)
       .order("hole_number", { ascending: true });
     
+    const duration = Date.now() - startTime;
+
     if (error) {
+      trackEvent(EVENTS.ROUND_DATA_FETCHED, {
+        success: false,
+        error_code: error.code,
+        error_message: error.message,
+        round_id,
+        operation_duration_ms: duration
+      });
+      
       console.error("[getRoundHoleData] Error getting hole data:", error);
       throw error;
     }
     
-    console.log("[getRoundHoleData] Found hole data:", data?.length, "holes");
+    trackEvent(EVENTS.ROUND_DATA_FETCHED, {
+      success: true,
+      round_id,
+      holes_count: data?.length || 0,
+      operation_duration_ms: duration
+    });
+    
     return data || [];
   } catch (error) {
     console.error("[getRoundHoleData] Exception in getRoundHoleData:", error);
@@ -119,10 +176,9 @@ export const getRoundHoleData = async (round_id) => {
  * @returns {object} The updated round record.
  */
 export const completeRound = async (round_id) => {
+  const startTime = Date.now();
+  
   try {
-    console.log("[completeRound] Calculating final statistics for round:", round_id);
-    
-    // 1. Get the course_id from the round
     const { data: roundData, error: roundError } = await supabase
       .from("rounds")
       .select("course_id, profile_id, selected_tee_name") 
@@ -131,7 +187,6 @@ export const completeRound = async (round_id) => {
       
     if (roundError) throw roundError;
     
-    // 2. Get the par value for that course
     const { data: courseData, error: courseError } = await supabase
       .from("courses")
       .select("par")
@@ -140,9 +195,8 @@ export const completeRound = async (round_id) => {
       
     if (courseError) throw courseError;
     
-    const coursePar = courseData.par || 72; // Default to 72 if par is not set
+    const coursePar = courseData.par || 72;
     
-    // 3. Get all hole records for this round
     const { data: holeRecords, error: holesError } = await supabase
       .from("shots")
       .select("total_score")
@@ -150,22 +204,13 @@ export const completeRound = async (round_id) => {
       
     if (holesError) throw holesError;
     
-    // 4. Calculate total gross shots by summing the total_score for each hole
     let grossShots = 0;
     holeRecords.forEach(hole => {
       grossShots += hole.total_score || 0;
     });
     
-    // 5. Calculate score relative to par
     const score = grossShots - coursePar;
     
-    console.log("[completeRound] Statistics calculated:", {
-      coursePar,
-      grossShots,
-      score
-    });
-    
-    // 6. Update the round record with calculated values and mark as complete
     const { data, error } = await supabase
       .from("rounds")
       .update({ 
@@ -176,34 +221,73 @@ export const completeRound = async (round_id) => {
       .eq("id", round_id)
       .select();
 
+    const duration = Date.now() - startTime;
+
     if (error) {
+      trackEvent(EVENTS.ROUND_COMPLETED, {
+        success: false,
+        error_code: error.code,
+        error_message: error.message,
+        round_id,
+        operation_duration_ms: duration
+      });
+      
       console.error("[completeRound] Error completing round:", error);
       throw error;
     }
 
-    console.log("[completeRound] Round completed successfully:", data);
+    trackEvent(EVENTS.ROUND_COMPLETED, {
+      success: true,
+      round_id,
+      profile_id: roundData.profile_id,
+      course_id: roundData.course_id,
+      gross_shots: grossShots,
+      score,
+      course_par: coursePar,
+      holes_played: holeRecords.length,
+      operation_duration_ms: duration
+    });
     
-    // 7. Trigger insights generation
     try {
-      console.log("[completeRound] Triggering insights generation Edge Function");
+      console.log("[completeRound] Triggering insights generation");
       
-      supabase.functions.invoke('analyze-golf-performance', {
+      const insightsPromise = supabase.functions.invoke('analyze-golf-performance', {
         body: { 
           userId: roundData.profile_id,
           roundId: round_id
         }
-      }).then(({ data: insightsData, error: insightsError }) => {
-        if (insightsError) {
-          console.error("[completeRound] Error from insights Edge Function:", insightsError);
-        } else {
-          console.log("[completeRound] Insights generated successfully:", insightsData);
-        }
-      }).catch(err => {
-        console.error("[completeRound] Exception calling insights Edge Function:", err);
       });
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Insights generation timeout')), 30000)
+      );
+
+      Promise.race([insightsPromise, timeoutPromise])
+        .then(({ data: insightsData, error: insightsError }) => {
+          if (insightsError) {
+            trackEvent(EVENTS.INSIGHTS_GENERATED, {
+              success: false,
+              error_message: insightsError.message,
+              round_id
+            });
+          } else {
+            trackEvent(EVENTS.INSIGHTS_GENERATED, {
+              success: true,
+              round_id,
+              insights_count: insightsData?.insights?.length || 0
+            });
+          }
+        })
+        .catch(err => {
+          trackEvent(EVENTS.INSIGHTS_GENERATED, {
+            success: false,
+            error_message: err.message,
+            round_id
+          });
+        });
       
     } catch (insightsError) {
-      console.error("[completeRound] Failed to trigger insights generation:", insightsError);
+      console.error("[completeRound] Failed to trigger insights:", insightsError);
     }
 
     return data;
@@ -220,20 +304,35 @@ export const completeRound = async (round_id) => {
  * @returns {Promise<boolean>} Success status
  */
 export const deleteAbandonedRound = async (round_id) => {
-  console.log("[deleteAbandonedRound] Removing abandoned round:", round_id);
+  const startTime = Date.now();
   
   try {
-    // Delete the round record
     const { error } = await supabase
       .from("rounds")
       .delete()
       .eq("id", round_id)
-      .eq("is_complete", false); // Safety check - only delete incomplete rounds
+      .eq("is_complete", false);
     
+    const duration = Date.now() - startTime;
+
     if (error) {
+      trackEvent(EVENTS.ROUND_ABANDONED, {
+        success: false,
+        error_code: error.code,
+        error_message: error.message,
+        round_id,
+        operation_duration_ms: duration
+      });
+      
       console.error("[deleteAbandonedRound] Error deleting round:", error);
       return false;
     }
+    
+    trackEvent(EVENTS.ROUND_ABANDONED, {
+      success: true,
+      round_id,
+      operation_duration_ms: duration
+    });
     
     console.log("[deleteAbandonedRound] Successfully deleted abandoned round");
     return true;

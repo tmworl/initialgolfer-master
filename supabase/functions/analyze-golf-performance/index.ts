@@ -333,7 +333,7 @@ serve(async (req) => {
       
       maxTokens = 10000; // Comprehensive response for paid product
       
-      // Existing premium prompt - unchanged from original
+      // Premium prompt with added rendering optimization directives
       promptContent = `You are a PGA Tour-certified golf coach with expertise in statistical analysis and golf course management. Your coaching philosophy centers on personalized improvement through data-driven insights, focusing on the 20% of changes that create 80% of improvement for each unique player. Create personalized, specific, and actionable insights focused on helping them improve. Think beyond basic analysis - create longitudinal, spatial, and sequence-based insights that demonstrate extraordinary value to help players score better, realistically score better.
 
 I'm providing granular shot-by-shot data from ${golfData.totalRounds} recent rounds from a ${userHandicap ? `${userHandicap} handicap` : 'golfer'}. Each round contains shots per hole, with timestamps, categorization by type of shot, and quality assessment (On Target/Slightly Off/Recovery Needed), with timestamps so you can see the timeline of each hole and each hole as one entity that is made up of single parts that make the total number for the whole. The data represents play across different courses. If you know any specifics about these courses or holes, use that knowledge in the assessment to improve contextual information on the rounds.
@@ -365,9 +365,37 @@ As you analyze this data, focus on these high-value dimensions:
    - Make reasonable inferences about causes (e.g., 3-putts likely from poor approach shots, bad tee shot means recovery long shots, and harder approaches)
    - Connect outcome patterns to skill gaps
    - Identify the root causes of recurring issues
-   - Use this causal reasoning to build narratives: explain how issues cascade (e.g., “Missed tee shots led to recovery mode, which led to missed approaches, which led to bogeys or worse”), and then suggest how to break the cycle.
+   - Use this causal reasoning to build narratives: explain how issues cascade (e.g., "Missed tee shots led to recovery mode, which led to missed approaches, which led to bogeys or worse"), and then suggest how to break the cycle.
 
 Remember to stay grounded in the data provided. While you should make reasonable inferences, don't invent techniques or specifics that aren't supported by the data. Be specific and concise, focusing on insights that have the greatest potential impact on scoring.
+
+TECHNICAL RENDERING SPECIFICATIONS:
+  
+Optimize content formatting for our mobile UI constraints with these technical guidelines:
+
+**Bullet Lists** ✅
+- Use for scannable technique recommendations
+- Keep to 3-5 items maximum for viewport optimization
+- Precede with clear context statement
+
+**Numbered Lists** ✅
+- Ideal for sequential practice drills or procedural instructions
+- Maintain consistent grammatical structure between list items
+- Include estimated time investment when applicable
+
+**Emojis** ✅
+- Strategic placement for visual hierarchy (🏌️‍♂️ 🎯 🔄)
+- One emoji per major concept for consistent visual parsing
+- Avoid clustering which creates cognitive load
+
+**Coach Quotations**
+Instead of blockquotes which aren't rendered correctly, use:
+"Your weight transfer timing is the key to distance" - Coach Wilson 🏆
+
+**Paragraph Structure**
+- Keep paragraphs under 3 lines for optimal mobile consumption
+- Use precise, direct language optimized for small viewport reading
+- Employ line breaks strategically to create visual breathing room
 
 Please provide your insights as an array of cards in this JSON format:
 {
@@ -385,7 +413,7 @@ Please provide your insights as an array of cards in this JSON format:
   }]
 }
 
-Generate as many cards as needed to convey valuable insights. The first card should be a Summary card (At the srart, add a single sentence describing the overall personality of the most recent round as a coach would — e.g. “This was a rollercoaster round with strong birdie chances offset by two blowups.” This helps the user emotionally understand what kind of round it was) and summarise the users recent rounds, trends, how they can improve. Each card after should focus on a specific aspect of the player's game. Order cards by importance using the priority field.`;
+Generate as many cards as needed to convey valuable insights. The first card should be a Summary card (At the srart, add a single sentence describing the overall personality of the most recent round as a coach would — e.g. "This was a rollercoaster round with strong birdie chances offset by two blowups." This helps the user emotionally understand what kind of round it was) and summarise the users recent rounds, trends, how they can improve. Each card after should focus on a specific aspect of the player's game. Order cards by importance using the priority field.`;
 
     } else {
       // NON-PRODUCT A USERS: Limited data with conversion hooks
@@ -559,16 +587,23 @@ Create one summary card and four premium feature cards. For the premium feature 
           summary: insightsJSON.cards?.find(card => card.type === "summary")?.content || 
                    "Complete a round to get basic insights about your game.",
           
-          // Transform all cards to include CTA for premium feature cards
-          tieredInsights: insightsJSON.cards?.map(card => ({
-            id: card.id,
-            title: card.title,
-            content: card.content,
-            iconName: card.icon?.name || "analytics-outline",
-            variant: mapCardVariantToUi(card.variant),
-            // Add CTA for premium feature cards - NO isPremiumFeature flag
-            ctaText: card.type === "premium-feature" ? (card.cta_text || "Unlock Premium Insights") : undefined
-          })) || []
+          // Transform all cards to include PremiumButton integration for conversion cards
+          tieredInsights: insightsJSON.cards?.map(card => {
+            // Determine if this is a premium feature card
+            const isPremiumFeature = card.type === "premium-feature";
+            
+            return {
+              id: card.id,
+              title: card.title,
+              content: card.content,
+              iconName: card.icon?.name || "analytics-outline",
+              variant: mapCardVariantToUi(card.variant),
+              // Add properties for PremiumButton integration
+              usePremiumButton: isPremiumFeature,
+              productId: isPremiumFeature ? "product_a" : null,
+              ctaText: isPremiumFeature ? (card.cta_text || "Unlock Premium Insights") : undefined
+            };
+          }) || []
         };
         
         // Add placeholder legacy fields with conversion hooks for compatibility

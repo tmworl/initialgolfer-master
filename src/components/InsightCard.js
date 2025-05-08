@@ -1,214 +1,250 @@
-// Modified version of src/components/InsightCard.js with text containment improvements
+// src/components/InsightCard.js
+//
+// Strategically architected conversion surface with enhanced IAP integration
+// Leverages the specialized PremiumButton component for direct purchase flow
 
-import React from "react";
-import { View, StyleSheet, TouchableOpacity } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import theme from "../ui/theme";
-import Typography from "../ui/components/Typography";
-import Card from "../ui/components/Card";
-import Button from "../ui/components/Button";
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import Typography from '../ui/components/Typography';
+import Button from '../ui/components/Button';
+import Card from '../ui/components/Card';
+import PremiumButton from './PremiumButton';
+import theme from '../ui/theme';
+import * as Haptics from 'expo-haptics';
 
 /**
  * InsightCard Component
  * 
- * A strategic monetization surface for delivering insights with configurable
- * conversion touchpoints and premium-exclusive features.
- * MODIFIED FOR TEXT CONTAINMENT: Ensures all text content remains inside card boundaries
- * while allowing flexible height expansion.
+ * A presentation layer for golf insights with integrated monetization capabilities.
+ * Supports multiple display variants and conditional IAP integration through PremiumButton.
+ * 
+ * @param {Object} props Component props
+ * @param {string} props.title Card title
+ * @param {string} props.content Main card content
+ * @param {string} props.iconName Ionicons icon name
+ * @param {string} props.variant Display variant (standard, highlight, alert, success)
+ * @param {Function} props.onRefresh Optional refresh callback for premium users
+ * @param {boolean} props.loading Optional loading state
+ * @param {string} props.ctaText Optional call-to-action text
+ * @param {Function} props.ctaAction Optional call-to-action callback
+ * @param {boolean} props.usePremiumButton Whether to use PremiumButton (for conversion surfaces)
+ * @param {string} props.productId Product ID for IAP (required when usePremiumButton is true)
  */
 const InsightCard = ({
   title,
   content,
-  variant = "standard",
-  iconName = "golf-outline",
-  ctaText,
-  ctaAction,
+  iconName = 'analytics-outline',
+  variant = 'standard',
   onRefresh,
   loading = false,
-  style,
+  ctaText,
+  ctaAction,
+  usePremiumButton = false,
+  productId = null
 }) => {
-  // Determine variant-specific styling for monetization optimization
-  const variantStyle = getVariantStyle(variant);
+  const [expanded, setExpanded] = useState(false);
   
-  // Loading state with strategic minimal implementation
-  if (loading) {
-    return (
-      <Card style={[styles.card, style]}>
-        <View style={styles.header}>
-          <View style={[styles.iconContainer, variantStyle.iconContainer]}>
-            <Ionicons name={iconName} size={24} color={variantStyle.iconColor || theme.colors.primary} />
-          </View>
-          <Typography variant="subtitle" style={styles.headerText}>{title}</Typography>
-        </View>
-        <Typography variant="secondary" italic>Analyzing your golf game...</Typography>
-      </Card>
-    );
-  }
+  // Maximum content length before showing "Read More"
+  const CONTENT_PREVIEW_LENGTH = 150;
+  
+  // Whether content should be truncated
+  const shouldTruncate = content && content.length > CONTENT_PREVIEW_LENGTH;
+  
+  // Get display content based on expansion state
+  const displayContent = !expanded && shouldTruncate
+    ? `${content.substring(0, CONTENT_PREVIEW_LENGTH)}...`
+    : content;
+  
+  // Handle read more/less toggle with haptic feedback for engagement
+  const toggleExpanded = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setExpanded(!expanded);
+  };
+  
+  // Handle refresh action with haptic feedback
+  const handleRefresh = () => {
+    if (onRefresh) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      onRefresh();
+    }
+  };
+  
+  // Determine card style based on variant
+  const getCardStyle = () => {
+    switch (variant) {
+      case 'highlight':
+        return styles.highlightCard;
+      case 'alert':
+        return styles.alertCard;
+      case 'success':
+        return styles.successCard;
+      default:
+        return styles.standardCard;
+    }
+  };
+  
+  // Get icon color based on variant
+  const getIconColor = () => {
+    switch (variant) {
+      case 'highlight':
+        return theme.colors.primary;
+      case 'alert':
+        return theme.colors.error;
+      case 'success':
+        return theme.colors.success;
+      default:
+        return theme.colors.text;
+    }
+  };
+  
+  // Handle purchase completion callbacks
+  const handlePurchaseComplete = (result) => {
+    console.log('Purchase completed:', result);
+    // Notify parent component if needed
+    if (ctaAction) {
+      ctaAction(result);
+    }
+    
+    // Add analytics event tracking here if needed
+  };
   
   return (
-    <Card style={[styles.card, variantStyle.card, style]}>
-      {/* Card header with configurable icon and title - IMPROVED FOR TEXT WRAPPING */}
+    <Card style={[styles.card, getCardStyle()]} elevation="medium">
+      {/* Card Header */}
       <View style={styles.header}>
-        <View style={styles.leftHeader}>
-          <View style={[styles.iconContainer, variantStyle.iconContainer]}>
-            <Ionicons 
-              name={iconName} 
-              size={24} 
-              color={variantStyle.iconColor || theme.colors.primary} 
+        <View style={styles.titleContainer}>
+          {iconName && (
+            <Ionicons
+              name={iconName}
+              size={20}
+              color={getIconColor()}
+              style={styles.icon}
             />
-          </View>
-          {/* Title now has flex:1 and properly wraps */}
-          <View style={styles.titleContainer}>
-            <Typography 
-              variant="subtitle" 
-              color={variantStyle.titleColor}
-              style={styles.headerText}
-            >
-              {title}
-            </Typography>
-          </View>
+          )}
+          <Typography variant="subtitle" weight="semibold" style={styles.title}>
+            {title}
+          </Typography>
         </View>
         
-        {/* Premium-exclusive refresh button */}
-        {onRefresh && (
+        {/* Refresh button for premium users */}
+        {onRefresh && !loading && (
           <TouchableOpacity 
-            style={styles.refreshButton}
-            onPress={onRefresh}
-            activeOpacity={0.7}
+            onPress={handleRefresh} 
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
           >
-            <Ionicons 
-              name="refresh-outline" 
-              size={22} 
-              color={theme.colors.primary} 
-            />
+            <Ionicons name="refresh-outline" size={18} color={theme.colors.text} />
+          </TouchableOpacity>
+        )}
+        
+        {/* Loading indicator when refreshing */}
+        {loading && (
+          <Ionicons name="sync-outline" size={18} color={theme.colors.text} />
+        )}
+      </View>
+      
+      {/* Card Content */}
+      <View style={styles.content}>
+        <Typography variant="body" style={styles.contentText}>
+          {displayContent}
+        </Typography>
+        
+        {/* Read More/Less Toggle */}
+        {shouldTruncate && (
+          <TouchableOpacity onPress={toggleExpanded} style={styles.readMoreButton}>
+            <Typography 
+              variant="body" 
+              weight="medium" 
+              color={theme.colors.primary}
+            >
+              {expanded ? 'Read Less' : 'Read More'}
+            </Typography>
           </TouchableOpacity>
         )}
       </View>
       
-      {/* Card content with flexible rendering - IMPROVED FOR CONTENT EXPANSION */}
-      <View style={styles.content}>
-        {typeof content === 'string' ? (
-          <Typography 
-            variant="body"
-            style={styles.contentText}
-          >
-            {content}
-          </Typography>
-        ) : (
-          content
-        )}
-      </View>
-      
-      {/* Conversion call-to-action */}
+      {/* Call to Action - Conditional PremiumButton Integration */}
       {ctaText && (
         <View style={styles.ctaContainer}>
-          <Button 
-            variant={variantStyle.buttonVariant || "primary"} 
-            onPress={ctaAction}
-          >
-            {ctaText}
-          </Button>
+          {usePremiumButton ? (
+            // Premium conversion surface with direct IAP flow
+            <PremiumButton
+              label={ctaText}
+              productId={productId}
+              onPurchaseComplete={handlePurchaseComplete}
+              variant={variant === 'highlight' ? 'primary' : 'secondary'}
+              style={styles.ctaButton}
+            />
+          ) : (
+            // Standard button for non-purchase actions
+            <Button
+              onPress={ctaAction}
+              variant="outline"
+              style={styles.ctaButton}
+            >
+              {ctaText}
+            </Button>
+          )}
         </View>
       )}
     </Card>
   );
 };
 
-/**
- * Maps variants to specific visual treatments optimized for conversion
- */
-const getVariantStyle = (variant) => {
-  switch(variant) {
-    case 'highlight':
-      return {
-        card: { borderLeftWidth: 4, borderLeftColor: theme.colors.primary },
-        iconContainer: { backgroundColor: `${theme.colors.primary}20` },
-        iconColor: theme.colors.primary,
-        titleColor: theme.colors.primary,
-        buttonVariant: "primary"
-      };
-    case 'alert':
-      return {
-        card: { borderLeftWidth: 4, borderLeftColor: theme.colors.accent || "#FF8800" },
-        iconContainer: { backgroundColor: `${theme.colors.accent || "#FF8800"}20` },
-        iconColor: theme.colors.accent || "#FF8800",
-        titleColor: theme.colors.accent || "#FF8800",
-        buttonVariant: "secondary"
-      };
-    case 'success':
-      return {
-        card: { borderLeftWidth: 4, borderLeftColor: theme.colors.success },
-        iconContainer: { backgroundColor: `${theme.colors.success}20` },
-        iconColor: theme.colors.success,
-        titleColor: theme.colors.success,
-        buttonVariant: "outline"
-      };
-    default:
-      return {
-        card: {},
-        iconContainer: { backgroundColor: "#f0f8ff" },
-        iconColor: theme.colors.primary,
-        titleColor: theme.colors.text,
-        buttonVariant: "primary"
-      };
-  }
-};
-
 const styles = StyleSheet.create({
   card: {
     marginBottom: theme.spacing.medium,
-    width: '100%',
-    // Remove any fixed height to allow expansion
+    overflow: 'hidden',
+  },
+  standardCard: {
+    // Default card styling
+  },
+  highlightCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: theme.colors.primary,
+  },
+  alertCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: theme.colors.error,
+  },
+  successCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: theme.colors.success,
   },
   header: {
-    flexDirection: "row",
-    alignItems: "flex-start", // Changed from center to allow title to expand vertically
-    justifyContent: "space-between",
-    marginBottom: theme.spacing.medium,
-    flexWrap: "wrap", // Allow wrapping for very long titles
-  },
-  leftHeader: {
-    flexDirection: "row", 
-    alignItems: "flex-start", // Changed from center
-    flex: 1, // Take available space
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: theme.spacing.medium,
-    backgroundColor: "#f0f8ff",
-    flexShrink: 0, // Prevent icon from shrinking
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.small,
   },
   titleContainer: {
-    flex: 1, // Take remaining space
-    flexDirection: 'column',
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
-  headerText: {
-    flexShrink: 1, // Allow text to shrink rather than overflow
-    flexWrap: 'wrap', // Enable text wrapping
+  icon: {
+    marginRight: theme.spacing.small,
+  },
+  title: {
+    flex: 1,
   },
   content: {
-    marginLeft: theme.spacing.xsmall,
-    // Remove any fixed height constraints
+    marginBottom: theme.spacing.small,
   },
   contentText: {
-    // Ensure text can wrap and expand vertically
-    flexWrap: 'wrap',
+    lineHeight: 22, // Optimized for mobile viewport consumption
+  },
+  readMoreButton: {
+    marginTop: theme.spacing.small,
+    alignSelf: 'flex-start',
   },
   ctaContainer: {
-    marginTop: theme.spacing.medium,
-    alignItems: "flex-start",
+    marginTop: theme.spacing.small,
   },
-  refreshButton: {
-    padding: theme.spacing.small,
-    borderRadius: 20,
-    marginLeft: theme.spacing.small,
-    flexShrink: 0, // Prevent button from shrinking
-  },
+  ctaButton: {
+    alignSelf: 'flex-start',
+    minWidth: 160, // Ensure sufficient touch target size
+  }
 });
 
 export default InsightCard;

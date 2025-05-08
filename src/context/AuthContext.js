@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Linking } from "react-native";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { supabase } from "../services/supabase";
+import { initAnalytics } from "../services/analytics";
 
 // Create navigation reference for cross-component navigation capabilities
 export const navigationRef = createNavigationContainerRef();
@@ -187,6 +188,7 @@ export const AuthProvider = ({ children }) => {
           
           // Load user permissions on session restoration
           await loadUserPermissions(data.session.user.id);
+          await initAnalytics(data.session.user.id); // Initialize analytics on session restore
         } else {
           console.log("No active session found in storage");
         }
@@ -221,6 +223,9 @@ export const AuthProvider = ({ children }) => {
       if (session?.user) {
         setUser(session.user);
         setEmailVerified(checkEmailVerification(session.user));
+        
+        // Initialize analytics with user ID
+        await initAnalytics(session.user.id);
         
         // Load user permissions
         await loadUserPermissions(session.user.id);

@@ -22,6 +22,8 @@ import Typography from "../ui/components/Typography";
 import Button from "../ui/components/Button";
 import DistanceIndicator from '../components/DistanceIndicator';
 import { useFocusEffect } from '@react-navigation/native';
+import { trackEvent, trackError, ERROR_TYPES } from "../services/analytics";
+import NetInfo from '@react-native-community/netinfo';
 
 /**
  * TrackerScreen Component
@@ -539,68 +541,87 @@ export default function TrackerScreen({ navigation }) {
    * Enhanced to include POI data in the saved hole_data
    */
   const finishRound = async () => {
+    const startTime = Date.now();
+    let completedHoles = 0;
+    let totalShotCount = 0;
+    
     try {
-      // Show loading state
+      // Track flow started
+      trackEvent('round_completion_started', {
+        round_id: round?.id,
+        current_hole: currentHole
+      });
+      
       setLoading(true);
       
-      // Save current hole first
       await saveCurrentHoleToStorage();
       
-      // Get all stored hole data
       const storedDataStr = await AsyncStorage.getItem(`round_${round.id}_holes`);
       if (!storedDataStr) {
-        throw new Error("No hole data found for this round");
+        const missingDataError = new Error("No hole data found for this round");
+        await trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, missingDataError, {
+          round_id: round.id,
+          current_hole: currentHole,
+          error_location: 'finishRound'
+        });
+        throw missingDataError;
       }
       
       const storedHoleData = JSON.parse(storedDataStr);
       
-      // Save each hole to the database
+      // Process each hole and track statistics
       for (let holeNum = 1; holeNum <= totalHoles; holeNum++) {
-        // Skip holes with no data
         if (!storedHoleData[holeNum] || storedHoleData[holeNum].shots.length === 0) {
           continue;
         }
         
         const holeInfo = storedHoleData[holeNum];
         const totalScore = holeInfo.shots.length;
+        totalShotCount += totalScore;
+        completedHoles++;
         
-        // Create hole data object including POI data
         const holeDataForDb = {
           par: holeInfo.par,
           distance: holeInfo.distance,
           index: holeInfo.index,
           features: holeInfo.features,
           shots: holeInfo.shots,
-          poi: holeInfo.poi // Include POI data in database record
+          poi: holeInfo.poi
         };
         
-        // Save hole data to database
-        await saveHoleData(
-          round.id,
-          holeNum,
-          holeDataForDb,
-          totalScore
-        );
-        
-        console.log(`Hole ${holeNum} data saved to database`);
+        await saveHoleData(round.id, holeNum, holeDataForDb, totalScore);
       }
       
-      // Complete the round
       await completeRound(round.id);
-      console.log("Round completed successfully");
       
-      // Clear AsyncStorage data for this round
+      // Track successful completion
+      trackEvent('round_completion_succeeded', {
+        round_id: round.id,
+        holes_completed: completedHoles,
+        total_shots: totalShotCount,
+        operation_duration_ms: Date.now() - startTime
+      });
+      
       await AsyncStorage.removeItem(`round_${round.id}_holes`);
       await AsyncStorage.removeItem("currentRound");
       
-      // Navigate to scorecard with replace to prevent back navigation to the tracker
-      // This creates a cleaner flow where completing a round leads directly to the scorecard
       navigation.replace("ScorecardScreen", { 
         roundId: round.id,
-        fromTracker: true // Add flag to indicate we came from tracker
+        fromTracker: true
       });
     } catch (error) {
       console.error("Error finishing round:", error);
+      
+      // Track error via API
+      await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, error, {
+        round_id: round?.id,
+        current_hole: currentHole,
+        completed_holes: completedHoles,
+        total_shots: totalShotCount,
+        operation_duration_ms: Date.now() - startTime,
+        network_state: (await NetInfo.fetch()).isConnected ? 'connected' : 'disconnected'
+      });
+      
       setLoading(false);
       Alert.alert(
         "Error",

@@ -15,6 +15,21 @@ let currentUserId = null;
 let eventBuffer = [];
 let isInitialized = false;
 
+// Error tracking constants
+export const ERROR_TYPES = {
+  ROUND_COMPLETION_ERROR: 'round_completion_error',
+  DATA_PERSISTENCE_ERROR: 'data_persistence_error',
+  API_ERROR: 'api_error',
+  NAVIGATION_ERROR: 'navigation_error'
+};
+
+// Event constants for consistent naming across application
+export const EVENTS = {
+  ROUND_ENTITY_CREATED: 'round_entity_created',
+  ROUND_ENTITY_DELETED: 'round_entity_deleted',
+  ERROR_OCCURRED: 'error_occurred' // New event type for error tracking
+};
+
 /**
  * Initialize analytics service with user identity
  * 
@@ -31,11 +46,42 @@ export async function initAnalytics(userId) {
   
   console.log(`[Analytics] Initialized for user: ${userId}`);
   
-  // Restore buffered events if any
   await restoreEventBuffer();
-  
-  // Process any buffered events
   processEventBuffer();
+}
+
+/**
+ * Track error events via the existing tracking infrastructure
+ * 
+ * @param {string} errorType - The type of error from ERROR_TYPES
+ * @param {Error|string} error - The error object or message
+ * @param {Object} context - Additional context about the error
+ * @returns {Promise<boolean>} Success indicator
+ */
+export async function trackError(errorType, error, context = {}) {
+  if (!ERROR_TYPES[errorType]) {
+    console.warn('[Analytics] Invalid error type:', errorType);
+    return false;
+  }
+
+  // Extract basic error info
+  const errorInfo = {
+    message: error?.message || String(error),
+    stack: error?.stack,
+    name: error?.name || 'Error',
+    type: errorType
+  };
+  
+  // Create the error event payload
+  const properties = {
+    ...context,
+    ...errorInfo,
+    timestamp: Date.now(),
+    app_version: APP_VERSION
+  };
+  
+  // Use existing trackEvent infrastructure
+  return await trackEvent(EVENTS.ERROR_OCCURRED, properties);
 }
 
 /**
@@ -51,7 +97,6 @@ export async function trackEvent(eventName, properties = {}) {
     return false;
   }
   
-  // Create enriched event object with device context
   const eventData = {
     name: eventName,
     properties: {
@@ -66,25 +111,20 @@ export async function trackEvent(eventName, properties = {}) {
     timestamp: Date.now()
   };
   
-  // Log to console for development visibility
   console.log(`[Analytics] Event: ${eventName}`, properties);
   
-  // If not initialized, buffer the event
   if (!isInitialized || !currentUserId) {
     console.log(`[Analytics] Not initialized, buffering event: ${eventName}`);
     return bufferEvent(eventData);
   }
   
-  // Check network connectivity
   const networkState = await NetInfo.fetch();
   
-  // If offline, buffer event for later
   if (!networkState.isConnected) {
     console.log(`[Analytics] Device offline, buffering event: ${eventName}`);
     return bufferEvent(eventData);
   }
   
-  // If online, send immediately
   return sendEvent(eventData);
 }
 
@@ -96,7 +136,6 @@ export async function trackEvent(eventName, properties = {}) {
  */
 async function sendEvent(eventData) {
   try {
-    // Call analytics edge function
     const { data, error } = await supabase.functions.invoke('track-analytics', {
       body: { 
         event: eventData.name, 
@@ -127,8 +166,6 @@ async function sendEvent(eventData) {
 async function bufferEvent(eventData) {
   try {
     eventBuffer.push(eventData);
-    
-    // Persist buffer to local storage
     await AsyncStorage.setItem(EVENT_BUFFER_KEY, JSON.stringify(eventBuffer));
     return true;
   } catch (error) {
@@ -143,7 +180,6 @@ async function bufferEvent(eventData) {
 async function restoreEventBuffer() {
   try {
     const storedBuffer = await AsyncStorage.getItem(EVENT_BUFFER_KEY);
-    
     if (storedBuffer) {
       eventBuffer = JSON.parse(storedBuffer);
       console.log(`[Analytics] Restored ${eventBuffer.length} buffered events`);
@@ -163,21 +199,17 @@ async function processEventBuffer() {
   
   console.log(`[Analytics] Processing ${eventBuffer.length} buffered events`);
   
-  // Check network connectivity
   const networkState = await NetInfo.fetch();
   if (!networkState.isConnected) {
     console.log('[Analytics] Device offline, cannot process buffer');
     return;
   }
   
-  // Process each event in buffer
   const successfulEvents = [];
   
   for (const event of eventBuffer) {
     try {
-      // Send event
       const success = await sendEvent(event);
-      
       if (success) {
         successfulEvents.push(event);
       }
@@ -186,19 +218,9 @@ async function processEventBuffer() {
     }
   }
   
-  // Remove successful events from buffer
   if (successfulEvents.length > 0) {
     eventBuffer = eventBuffer.filter(event => !successfulEvents.includes(event));
-    
-    // Update persistent buffer
     await AsyncStorage.setItem(EVENT_BUFFER_KEY, JSON.stringify(eventBuffer));
-    
     console.log(`[Analytics] Processed ${successfulEvents.length} buffered events, ${eventBuffer.length} remaining`);
   }
 }
-
-// Export event constants for consistent naming across application
-export const EVENTS = {
-  ROUND_ENTITY_CREATED: 'round_entity_created',
-  ROUND_ENTITY_DELETED: 'round_entity_deleted'
-};

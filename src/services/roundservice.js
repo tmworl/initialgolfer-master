@@ -1,7 +1,7 @@
 // src/services/roundservice.js
 
 import { supabase } from "./supabase";
-import { trackEvent, EVENTS } from "./analytics";
+import { trackEvent, trackError, ERROR_TYPES, EVENTS } from "./analytics";
 
 /**
  * Create a new round record in Supabase with analytics tracking.
@@ -177,32 +177,58 @@ export const getRoundHoleData = async (round_id) => {
  */
 export const completeRound = async (round_id) => {
   const startTime = Date.now();
+  const context = { round_id };
   
   try {
+    // Fetch round data
     const { data: roundData, error: roundError } = await supabase
       .from("rounds")
       .select("course_id, profile_id, selected_tee_name") 
       .eq("id", round_id)
       .single();
       
-    if (roundError) throw roundError;
+    if (roundError) {
+      await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, roundError, {
+        ...context,
+        error_stage: 'round_data_fetch',
+        operation_duration_ms: Date.now() - startTime
+      });
+      throw roundError;
+    }
     
+    // Fetch course data
     const { data: courseData, error: courseError } = await supabase
       .from("courses")
       .select("par")
       .eq("id", roundData.course_id)
       .single();
       
-    if (courseError) throw courseError;
+    if (courseError) {
+      await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, courseError, {
+        ...context,
+        course_id: roundData.course_id,
+        error_stage: 'course_data_fetch',
+        operation_duration_ms: Date.now() - startTime
+      });
+      throw courseError;
+    }
     
     const coursePar = courseData.par || 72;
     
+    // Fetch hole records
     const { data: holeRecords, error: holesError } = await supabase
       .from("shots")
       .select("total_score")
       .eq("round_id", round_id);
       
-    if (holesError) throw holesError;
+    if (holesError) {
+      await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, holesError, {
+        ...context,
+        error_stage: 'holes_data_fetch',
+        operation_duration_ms: Date.now() - startTime
+      });
+      throw holesError;
+    }
     
     let grossShots = 0;
     holeRecords.forEach(hole => {
@@ -211,6 +237,7 @@ export const completeRound = async (round_id) => {
     
     const score = grossShots - coursePar;
     
+    // Update round with completion data
     const { data, error } = await supabase
       .from("rounds")
       .update({ 
@@ -224,18 +251,17 @@ export const completeRound = async (round_id) => {
     const duration = Date.now() - startTime;
 
     if (error) {
-      trackEvent(EVENTS.ROUND_COMPLETED, {
-        success: false,
-        error_code: error.code,
-        error_message: error.message,
-        round_id,
+      await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, error, {
+        ...context,
+        error_stage: 'round_update',
+        gross_shots: grossShots,
+        score,
         operation_duration_ms: duration
       });
-      
-      console.error("[completeRound] Error completing round:", error);
       throw error;
     }
 
+    // Track successful completion
     trackEvent(EVENTS.ROUND_COMPLETED, {
       success: true,
       round_id,
@@ -248,6 +274,7 @@ export const completeRound = async (round_id) => {
       operation_duration_ms: duration
     });
     
+    // Generate insights
     try {
       console.log("[completeRound] Triggering insights generation");
       
@@ -265,10 +292,10 @@ export const completeRound = async (round_id) => {
       Promise.race([insightsPromise, timeoutPromise])
         .then(({ data: insightsData, error: insightsError }) => {
           if (insightsError) {
-            trackEvent(EVENTS.INSIGHTS_GENERATED, {
-              success: false,
-              error_message: insightsError.message,
-              round_id
+            trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, insightsError, {
+              ...context,
+              error_stage: 'insights_generation',
+              operation_duration_ms: Date.now() - startTime
             });
           } else {
             trackEvent(EVENTS.INSIGHTS_GENERATED, {
@@ -279,20 +306,33 @@ export const completeRound = async (round_id) => {
           }
         })
         .catch(err => {
-          trackEvent(EVENTS.INSIGHTS_GENERATED, {
-            success: false,
-            error_message: err.message,
-            round_id
+          trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, err, {
+            ...context,
+            error_stage: 'insights_generation_timeout',
+            operation_duration_ms: Date.now() - startTime
           });
         });
       
     } catch (insightsError) {
       console.error("[completeRound] Failed to trigger insights:", insightsError);
+      await trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, insightsError, {
+        ...context,
+        error_stage: 'insights_generation_failed',
+        operation_duration_ms: Date.now() - startTime
+      });
     }
 
     return data;
   } catch (error) {
     console.error("[completeRound] Error in complete round process:", error);
+    
+    // Catch-all error tracking
+    await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, error, {
+      ...context,
+      error_stage: 'unknown',
+      operation_duration_ms: Date.now() - startTime
+    });
+    
     throw error;
   }
 };

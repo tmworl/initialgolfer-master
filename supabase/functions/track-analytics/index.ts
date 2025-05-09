@@ -108,7 +108,7 @@ serve(async (req) => {
     }
     
     // Enrich event with server-side context
-    const enrichedProperties = {
+    let enrichedProperties = {
       distinct_id: userId,
       ...properties,
       // Append server-side properties
@@ -137,6 +137,29 @@ serve(async (req) => {
           headers: { "Content-Type": "application/json" } 
         }
       );
+    }
+    
+    // Check for critical error events and add additional metadata
+    if (event === 'round_completion_error' || 
+        event === 'data_persistence_error' || 
+        event === 'api_error') {
+      
+      console.log(`Forwarding critical error event to PostHog: ${event}`);
+      
+      // Tag error events with additional metadata
+      enrichedProperties = {
+        ...enrichedProperties,
+        server_environment: Deno.env.get("ENVIRONMENT") || "production",
+        processing_region: Deno.env.get("DENO_REGION") || "unknown",
+        error_event: true
+      };
+      
+      // Additional logging for critical errors
+      console.log(`Critical error details: ${JSON.stringify({
+        error_type: event,
+        message: properties.message,
+        round_id: properties.round_id
+      })}`);
     }
     
     // Forward to PostHog API

@@ -6,27 +6,13 @@
 import React, { useMemo } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import platformDetection from '../platform/detection';
-import visualProperties from '../platform/visualProperties';
 
-// Resilient BlurView integration with capability detection
+// Import BlurView if available (it might be from expo-blur)
 let BlurView;
 try {
-  // Dynamic import with error handling
-  const BlurViewModule = require('@react-native-community/blur');
-  BlurView = BlurViewModule.BlurView;
+  BlurView = require('expo-blur').BlurView;
 } catch (e) {
-  // Fallback View implementation when module is unavailable
-  BlurView = ({ style, children, ...props }) => {
-    return (
-      <View 
-        style={[style, { backgroundColor: 'rgba(255,255,255,0.85)' }]} 
-        {...props}
-      >
-        {children}
-      </View>
-    );
-  };
-  console.warn('BlurView module not available - using fallback implementation');
+  // Blur view not available
 }
 
 // Material types that affect appearance properties
@@ -71,38 +57,36 @@ const BackdropMaterial = ({
   
   // Calculate blur parameters based on material type
   const blurProperties = useMemo(() => {
-    // Map material types to semantic blur intensities
-    const intensityMap = {
-      [MATERIAL_TYPES.THIN]: 'light',
-      [MATERIAL_TYPES.REGULAR]: 'regular',
-      [MATERIAL_TYPES.THICK]: 'heavy',
-      [MATERIAL_TYPES.SOLID]: 'none'
-    };
+    // Default parameters
+    let blurType = 'regular';
+    let blurIntensity = 40;
+    let backdropOpacity = 0.8;
     
-    // Calculate blur intensity, allowing custom override
-    const blurIntensity = intensity || visualProperties.getBlurIntensity(intensityMap[type]);
-    
-    // Determine material opacity based on type
-    const opacityMap = {
-      [MATERIAL_TYPES.THIN]: 0.5,
-      [MATERIAL_TYPES.REGULAR]: 0.7,
-      [MATERIAL_TYPES.THICK]: 0.85,
-      [MATERIAL_TYPES.SOLID]: 1.0
-    };
-    
-    // Use provided opacity or fall back to mapped value
-    const materialOpacity = opacity !== undefined ? opacity : opacityMap[type];
-    
-    // Get backdrop color with computed opacity
-    const backdropColor = visualProperties.getBackdropColor(backgroundColor, materialOpacity);
-    
-    // Select appropriate blur type for iOS
-    let blurType = 'light';
-    if (Platform.OS === 'ios') {
-      blurType = type === MATERIAL_TYPES.THIN ? 'thinMaterialLight' :
-                 type === MATERIAL_TYPES.REGULAR ? 'materialLight' : 
-                 'thickMaterialLight';
+    // Adjust based on material type
+    switch (type) {
+      case MATERIAL_TYPES.THIN:
+        blurType = 'light';
+        blurIntensity = 20;
+        backdropOpacity = 0.7;
+        break;
+      case MATERIAL_TYPES.THICK:
+        blurType = 'dark';
+        blurIntensity = 60;
+        backdropOpacity = 0.9;
+        break;
+      case MATERIAL_TYPES.SOLID:
+        blurType = null;
+        blurIntensity = 0;
+        backdropOpacity = 1;
+        break;
     }
+    
+    // Override with custom values if provided
+    if (intensity !== undefined) blurIntensity = intensity;
+    if (opacity !== undefined) backdropOpacity = opacity;
+    
+    // Calculate backdrop color with opacity
+    const backdropColor = backgroundColor + Math.floor(backdropOpacity * 255).toString(16).padStart(2, '0');
     
     return {
       blurType,
@@ -115,7 +99,7 @@ const BackdropMaterial = ({
   if (Platform.OS === 'ios' && blurSupported && type !== MATERIAL_TYPES.SOLID) {
     return (
       <BlurView
-        style={[styles.container, style]}
+        style={style}
         blurType={blurProperties.blurType}
         blurAmount={blurProperties.blurIntensity}
         reducedTransparencyFallbackColor={blurProperties.backdropColor}
@@ -130,7 +114,6 @@ const BackdropMaterial = ({
   return (
     <View 
       style={[
-        styles.container,
         { backgroundColor: blurProperties.backdropColor },
         style
       ]}

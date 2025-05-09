@@ -26,20 +26,19 @@ const createStackNavigatorScreenOptions = () => {
     // Header material integration
     headerMode: 'float',
     headerTransparent: platformDetection.isIOS && platformDetection.supportsBlurEffects,
+    
+    // Let React Navigation handle status bar height calculations
+    
     headerBackground: ({ style }) => (
       platformDetection.isIOS && platformDetection.supportsBlurEffects ? (
         <BackdropMaterial
           type={MATERIAL_TYPES.THIN}
-          style={[
-            StyleSheet.absoluteFill,
-            style,
-            { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(200, 200, 200, 0.3)' }
-          ]}
+          // Critical: preserve original style provided by React Navigation without alteration
+          style={style}
         />
       ) : (
         <View
           style={[
-            StyleSheet.absoluteFill,
             style,
             {
               backgroundColor: tokens.colors.background.header,
@@ -50,11 +49,6 @@ const createStackNavigatorScreenOptions = () => {
         />
       )
     ),
-    
-    // CRITICAL FIX: Remove custom status bar height calculation and let React Navigation
-    // handle safe areas natively. This eliminates the header overlap issue on iOS.
-    // headerStatusBarHeight: platformDetection.getStatusBarHeight() +
-    //   (platformDetection.hasDynamicIsland() ? 4 : 0),
     
     // Typography refinements
     headerTitleStyle: {
@@ -90,7 +84,6 @@ const createStackNavigatorScreenOptions = () => {
         animation: 'timing',
         config: {
           duration: platform.isIOS ? 350 : 300,
-          // Use native driver for optimal performance
           useNativeDriver: true
         },
       },
@@ -107,9 +100,6 @@ const createStackNavigatorScreenOptions = () => {
 
 /**
  * Create stack navigator custom back button with platform optimizations
- * 
- * @param {Object} props - Props received from React Navigation
- * @returns {React.Component} Custom back button component
  */
 const CustomBackButton = ({ onPress, canGoBack }) => {
   if (!canGoBack) {
@@ -138,106 +128,6 @@ const CustomBackButton = ({ onPress, canGoBack }) => {
         color={platform.isIOS ? tokens.colors.tint.header : "#fff"}
       />
     </TouchableOpacity>
-  );
-};
-
-/**
- * Create a custom header component with iOS 18 visual refinements
- * 
- * @param {Object} props - Props from React Navigation
- * @returns {React.ReactElement} Custom header with material effects
- */
-const CustomHeader = ({ scene, previous, navigation }) => {
-  const { options } = scene.descriptor;
-  const title = getHeaderTitle(options, scene.route.name);
-  
-  const headerHeight = tokens.spacing.header.height + platformDetection.getStatusBarHeight();
-  
-  // Use material on iOS 18, standard header on other platforms
-  if (platformDetection.isIOS && platformDetection.supportsBlurEffects) {
-    return (
-      <BackdropMaterial
-        type={MATERIAL_TYPES.THIN}
-        style={[
-          styles.header,
-          { 
-            height: headerHeight,
-            paddingTop: platformDetection.getStatusBarHeight()
-          }
-        ]}
-      >
-        <View style={styles.headerContent}>
-          {previous ? (
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-              hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
-            >
-              <Ionicons
-                name="chevron-back"
-                size={28}
-                color={tokens.colors.tint.header}
-              />
-            </TouchableOpacity>
-          ) : null}
-          
-          <Typography
-            variant="subtitle"
-            weight="semibold"
-            style={styles.headerTitle}
-          >
-            {title}
-          </Typography>
-          
-          {/* Right button placeholder to balance title centering */}
-          {previous ? <View style={styles.rightPlaceholder} /> : null}
-        </View>
-      </BackdropMaterial>
-    );
-  }
-  
-  // Standard header for Android
-  return (
-    <View
-      style={[
-        styles.header,
-        {
-          height: headerHeight,
-          paddingTop: platformDetection.getStatusBarHeight(),
-          backgroundColor: tokens.colors.background.header,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: tokens.colors.border.header,
-        }
-      ]}
-    >
-      <View style={styles.headerContent}>
-        {previous ? (
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-            hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
-          >
-            <Ionicons
-              name="arrow-back"
-              size={24}
-              color="#fff"
-            />
-          </TouchableOpacity>
-        ) : null}
-        
-        <Typography
-          variant="subtitle"
-          weight="medium"
-          color="#fff"
-          style={[
-            styles.headerTitle,
-            { textAlign: 'left', marginLeft: previous ? 32 : 16 }
-          ]}
-        >
-          {title}
-        </Typography>
-      </View>
-    </View>
   );
 };
 
@@ -388,34 +278,15 @@ const createProfileStackConfig = () => {
 };
 
 const styles = StyleSheet.create({
-  header: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  headerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-  },
-  backButton: {
-    marginRight: 8,
-  },
   headerTitle: {
     flex: 1,
     textAlign: Platform.OS === 'ios' ? 'center' : 'left',
-  },
-  rightPlaceholder: {
-    width: 28,
-  },
+  }
 });
 
 export {
   createStackNavigatorScreenOptions,
   createHeaderLeft,
-  CustomHeader,
   createHomeStackConfig,
   createRoundsStackConfig,
   createInsightsStackConfig,

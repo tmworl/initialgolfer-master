@@ -1,26 +1,36 @@
 // src/ui/Layout.js
+
 import React from "react";
-import { SafeAreaView, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import theme from "./theme";
 
-// Layout component wraps content with SafeAreaView and consistent padding.
+// Layout component with proper safe area handling
 export default function Layout({ children, style }) {
+  // Use hooks instead of wrapping components
+  const insets = useSafeAreaInsets();
+  
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.container, style]}>
-        {children}
-      </View>
-    </SafeAreaView>
+    <View 
+      style={[
+        styles.container,
+        // Apply horizontal insets but let React Navigation handle vertical ones
+        {
+          paddingLeft: Math.max(theme.spacing.medium, insets.left),
+          paddingRight: Math.max(theme.spacing.medium, insets.right)
+        },
+        style
+      ]}
+    >
+      {children}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
   container: {
     flex: 1,
-    padding: theme.spacing.medium,
+    backgroundColor: theme.colors.background,
+    paddingVertical: theme.spacing.medium,
   },
 });

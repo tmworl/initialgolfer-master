@@ -15,15 +15,11 @@ try {
   // Blur view not available
 }
 
-// Material types that affect appearance properties
+// Material types for consistent styling
 export const MATERIAL_TYPES = {
-  // Ultra-thin blurred material used in iOS 18 headers and toolbars
   THIN: 'thin',
-  // Standard material used for cards and surfaces
   REGULAR: 'regular',
-  // Thicker material for modal sheets and elevated content
   THICK: 'thick',
-  // Solid material with no translucency for performance optimization
   SOLID: 'solid'
 };
 

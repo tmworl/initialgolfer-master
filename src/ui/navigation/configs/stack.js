@@ -1,12 +1,10 @@
 // src/ui/navigation/configs/stack.js
 //
-// Enhanced stack navigator configuration with iOS 18 header material integration
-// Implements Dynamic Island avoidance and animation refinements
+// Core navigation configuration architecture with centralized token system
 
 import React from 'react';
 import { TouchableOpacity, StyleSheet, View, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getHeaderTitle } from '@react-navigation/elements';
 import { TransitionPresets } from '@react-navigation/stack';
 import platformDetection from '../../platform/detection';
 import visualProperties from '../../platform/visualProperties';
@@ -17,23 +15,27 @@ import navigationTheme from '../theme';
 const { tokens, platform } = navigationTheme;
 
 /**
- * Create stack navigator default screen options with iOS 18 visual refinements
+ * Architectural foundation for stack navigation with centralized header management
  * 
- * @returns {Object} Default screen options for stack navigators
+ * This configuration architecture establishes stack navigators as the exclusive
+ * owners of header rendering while preserving platform-specific optimizations.
+ * 
+ * @returns {Object} Stack navigator screen options configuration
  */
 const createStackNavigatorScreenOptions = () => {
   return {
-    // Header material integration
+    // Core architectural boundaries
     headerMode: 'float',
     headerTransparent: platformDetection.isIOS && platformDetection.supportsBlurEffects,
     
-    // Let React Navigation handle status bar height calculations
+    // CRITICAL: Remove any explicit headerStatusBarHeight overrides
+    // Let React Navigation handle status bar height calculations natively
     
     headerBackground: ({ style }) => (
       platformDetection.isIOS && platformDetection.supportsBlurEffects ? (
         <BackdropMaterial
           type={MATERIAL_TYPES.THIN}
-          // Critical: preserve original style provided by React Navigation without alteration
+          // Preserve React Navigation's layout system
           style={style}
         />
       ) : (
@@ -99,7 +101,7 @@ const createStackNavigatorScreenOptions = () => {
 };
 
 /**
- * Create stack navigator custom back button with platform optimizations
+ * Platform-optimized back button implementation
  */
 const CustomBackButton = ({ onPress, canGoBack }) => {
   if (!canGoBack) {
@@ -132,10 +134,7 @@ const CustomBackButton = ({ onPress, canGoBack }) => {
 };
 
 /**
- * Create a custom header left component factory
- * 
- * @param {Function} navigation - Navigation object from React Navigation
- * @returns {Function} Function that returns a header left component
+ * Header left component factory
  */
 const createHeaderLeft = (navigation) => {
   return ({ canGoBack }) => {
@@ -153,10 +152,11 @@ const createHeaderLeft = (navigation) => {
 };
 
 /**
- * Configuration factory for home stack
- * 
- * @returns {Object} Configuration object with screen options
+ * Stack configuration factory definitions for all navigators
+ * Consumed by both external and internal stack navigators
  */
+
+// Home stack config
 const createHomeStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -164,7 +164,6 @@ const createHomeStackConfig = () => {
       HomeScreen: {
         options: {
           title: "Clubhouse",
-          // iOS 18 large title style
           headerLargeTitle: platformDetection.isIOS,
           headerLargeTitleStyle: {
             ...visualProperties.getOpticalTypography(34, '700'),
@@ -189,7 +188,6 @@ const createHomeStackConfig = () => {
           title: "Round Tracker",
           // Prevent going back directly from tracker without completing the round
           headerLeft: () => null,
-          // Apply different styling to this critical screen
           ...Platform.select({
             android: {
               headerStyle: {
@@ -217,7 +215,7 @@ const createHomeStackConfig = () => {
   };
 };
 
-// Add implementations for the other stack configurations
+// Rounds stack config
 const createRoundsStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -225,7 +223,6 @@ const createRoundsStackConfig = () => {
       RoundsScreen: {
         options: {
           title: "Your Rounds",
-          // iOS 18 large title style
           headerLargeTitle: platformDetection.isIOS,
           headerLargeTitleStyle: {
             ...visualProperties.getOpticalTypography(34, '700'),
@@ -241,6 +238,7 @@ const createRoundsStackConfig = () => {
   };
 };
 
+// Insights stack config
 const createInsightsStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -248,7 +246,6 @@ const createInsightsStackConfig = () => {
       InsightsScreen: {
         options: {
           title: "Golf Insights",
-          // iOS 18 large title style
           headerLargeTitle: platformDetection.isIOS,
           headerLargeTitleStyle: {
             ...visualProperties.getOpticalTypography(34, '700'),
@@ -259,6 +256,7 @@ const createInsightsStackConfig = () => {
   };
 };
 
+// Profile stack config
 const createProfileStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -266,7 +264,6 @@ const createProfileStackConfig = () => {
       ProfileScreen: {
         options: {
           title: "Profile",
-          // iOS 18 large title style
           headerLargeTitle: platformDetection.isIOS,
           headerLargeTitleStyle: {
             ...visualProperties.getOpticalTypography(34, '700'),

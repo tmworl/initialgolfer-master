@@ -1,146 +1,98 @@
 // src/ui/navigation/configs/stack.js
 //
-// Core navigation configuration architecture with centralized token system
+// Stack navigator configuration focused on rendering consistency
+// Architectural foundation that ensures proper header/content separation
 
 import React from 'react';
-import { TouchableOpacity, StyleSheet, View, Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { TransitionPresets } from '@react-navigation/stack';
-import platformDetection from '../../platform/detection';
-import visualProperties from '../../platform/visualProperties';
-import BackdropMaterial, { MATERIAL_TYPES } from '../../components/BackdropMaterial';
-import Typography from '../../components/Typography';
-import navigationTheme from '../theme';
-
-const { tokens, platform } = navigationTheme;
+import theme from '../../theme';
 
 /**
- * Architectural foundation for stack navigation with centralized header management
- * 
- * This configuration architecture establishes stack navigators as the exclusive
- * owners of header rendering while preserving platform-specific optimizations.
- * 
- * @returns {Object} Stack navigator screen options configuration
+ * Core navigation architecture with fixed rendering hierarchy
+ * Eliminates unpredictable positioning and z-index conflicts
  */
 const createStackNavigatorScreenOptions = () => {
   return {
-    // Core architectural boundaries
-    headerMode: 'float',
-    headerTransparent: platformDetection.isIOS && platformDetection.supportsBlurEffects,
+    // ARCHITECTURAL CHANGE: Fixed header positioning
+    // This ensures deterministic rendering hierarchy rather than floating headers
+    headerTransparent: false,
     
-    // CRITICAL: Remove any explicit headerStatusBarHeight overrides
-    // Let React Navigation handle status bar height calculations natively
+    // ARCHITECTURAL CHANGE: Fixed header style with explicit dimensions
+    // This establishes a predictable component tree with proper spacing
+    headerStyle: {
+      backgroundColor: theme.colors.background,
+      height: Platform.OS === 'ios' ? 44 : 56,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+      
+      // ARCHITECTURAL CHANGE: Standard elevation instead of complex shadow params
+      ...Platform.select({
+        ios: {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 1,
+        },
+        android: {
+          elevation: 2,
+        }
+      }),
+    },
     
-    headerBackground: ({ style }) => (
-      platformDetection.isIOS && platformDetection.supportsBlurEffects ? (
-        <BackdropMaterial
-          type={MATERIAL_TYPES.THIN}
-          // Preserve React Navigation's layout system
-          style={style}
-        />
-      ) : (
-        <View
-          style={[
-            style,
-            {
-              backgroundColor: tokens.colors.background.header,
-              borderBottomWidth: StyleSheet.hairlineWidth, 
-              borderBottomColor: tokens.colors.border.header
-            }
-          ]}
-        />
-      )
-    ),
-    
-    // Typography refinements
+    // Typography integration with design system
     headerTitleStyle: {
-      ...tokens.typography.header.title,
-      ...visualProperties.getOpticalTypography(
-        platform.isIOS ? 17 : 20, 
-        platform.isIOS ? '600' : '500'
-      ),
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
+      fontSize: 17,
+      fontWeight: '600',
+      color: theme.colors.text,
     },
     
-    // Platform-specific configurations
-    headerBackTitleVisible: platform.isIOS,
-    headerShadowVisible: !platform.isIOS,
+    headerTitleAlign: Platform.OS === 'ios' ? 'center' : 'left',
+    headerTintColor: theme.colors.primary,
     
-    // Animation refinements
-    gestureEnabled: platform.isIOS,
-    gestureDirection: 'horizontal',
-    
-    // Card styling with proper corner radius
+    // ARCHITECTURAL CHANGE: Explicit card style for screen content
+    // This ensures consistent background rendering
     cardStyle: {
-      backgroundColor: tokens.colors.background.card,
+      backgroundColor: theme.colors.background,
     },
     
-    // Platform-specific animation presets
-    ...Platform.select({
-      ios: TransitionPresets.SlideFromRightIOS,
-      android: TransitionPresets.FadeFromBottomAndroid,
-    }),
-    
-    // Animation timing refinements
-    transitionSpec: {
-      open: {
-        animation: 'timing',
-        config: {
-          duration: platform.isIOS ? 350 : 300,
-          useNativeDriver: true
-        },
-      },
-      close: {
-        animation: 'timing',
-        config: {
-          duration: platform.isIOS ? 350 : 300,
-          useNativeDriver: true
-        },
-      },
-    },
+    // Animation parameters remain standard by platform
+    gestureEnabled: Platform.OS === 'ios',
+    gestureDirection: 'horizontal',
   };
 };
 
 /**
- * Platform-optimized back button implementation
+ * Custom back button with standard styling parameters
  */
 const CustomBackButton = ({ onPress, canGoBack }) => {
-  if (!canGoBack) {
-    return null;
-  }
-
-  // Optimize hitSlop for touch targets
-  const hitSlop = { top: 12, right: 12, bottom: 12, left: 12 };
+  if (!canGoBack) return null;
 
   return (
     <TouchableOpacity
       onPress={onPress}
       style={{
         padding: 8,
-        marginLeft: platform.isAndroid ? 0 : -8,
+        marginLeft: Platform.OS === 'android' ? 0 : -8,
       }}
-      hitSlop={hitSlop}
-      // Enable GPU acceleration for back button animations on Android
-      style={Platform.OS === 'android' ? { 
-        renderToHardwareTextureAndroid: true 
-      } : undefined}
+      hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
     >
       <Ionicons
-        name={platform.isIOS ? "chevron-back" : "arrow-back"}
-        size={platform.isIOS ? 28 : 24}
-        color={platform.isIOS ? tokens.colors.tint.header : "#fff"}
+        name={Platform.OS === 'ios' ? "chevron-back" : "arrow-back"}
+        size={Platform.OS === 'ios' ? 28 : 24}
+        color={theme.colors.primary}
       />
     </TouchableOpacity>
   );
 };
 
 /**
- * Header left component factory
+ * Standard header left component factory
  */
 const createHeaderLeft = (navigation) => {
   return ({ canGoBack }) => {
-    if (!canGoBack) {
-      return null;
-    }
+    if (!canGoBack) return null;
     
     return (
       <CustomBackButton
@@ -151,12 +103,9 @@ const createHeaderLeft = (navigation) => {
   };
 };
 
-/**
- * Stack configuration factory definitions for all navigators
- * Consumed by both external and internal stack navigators
- */
+// Stack configuration factories with reduced complexity
+// These maintain consistent header treatment across all stacks
 
-// Home stack config
 const createHomeStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -164,58 +113,28 @@ const createHomeStackConfig = () => {
       HomeScreen: {
         options: {
           title: "Clubhouse",
-          headerLargeTitle: platformDetection.isIOS,
-          headerLargeTitleStyle: {
-            ...visualProperties.getOpticalTypography(34, '700'),
-          }
         }
       },
       CourseSelector: {
         options: {
           title: "Select Course",
-          ...Platform.select({
-            android: {
-              headerStyle: {
-                backgroundColor: tokens.colors.primary,
-              },
-              headerTintColor: '#fff',
-            }
-          })
         }
       },
       Tracker: {
-        options: ({ navigation }) => ({
+        options: {
           title: "Round Tracker",
-          // Prevent going back directly from tracker without completing the round
-          headerLeft: () => null,
-          ...Platform.select({
-            android: {
-              headerStyle: {
-                backgroundColor: tokens.colors.primary,
-              },
-              headerTintColor: '#fff',
-            }
-          })
-        })
+        }
       },
       ScorecardScreen: {
         options: {
           title: "Scorecard",
-          ...Platform.select({
-            android: {
-              headerStyle: {
-                backgroundColor: tokens.colors.primary,
-              },
-              headerTintColor: '#fff',
-            }
-          })
         }
       }
     }
   };
 };
 
-// Rounds stack config
+// Similar configurations for other stack navigators
 const createRoundsStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -223,10 +142,6 @@ const createRoundsStackConfig = () => {
       RoundsScreen: {
         options: {
           title: "Your Rounds",
-          headerLargeTitle: platformDetection.isIOS,
-          headerLargeTitleStyle: {
-            ...visualProperties.getOpticalTypography(34, '700'),
-          }
         }
       },
       ScorecardScreen: {
@@ -238,7 +153,6 @@ const createRoundsStackConfig = () => {
   };
 };
 
-// Insights stack config
 const createInsightsStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -246,17 +160,12 @@ const createInsightsStackConfig = () => {
       InsightsScreen: {
         options: {
           title: "Golf Insights",
-          headerLargeTitle: platformDetection.isIOS,
-          headerLargeTitleStyle: {
-            ...visualProperties.getOpticalTypography(34, '700'),
-          }
         }
       }
     }
   };
 };
 
-// Profile stack config
 const createProfileStackConfig = () => {
   return {
     screenOptions: createStackNavigatorScreenOptions(),
@@ -264,22 +173,11 @@ const createProfileStackConfig = () => {
       ProfileScreen: {
         options: {
           title: "Profile",
-          headerLargeTitle: platformDetection.isIOS,
-          headerLargeTitleStyle: {
-            ...visualProperties.getOpticalTypography(34, '700'),
-          }
         }
       }
     }
   };
 };
-
-const styles = StyleSheet.create({
-  headerTitle: {
-    flex: 1,
-    textAlign: Platform.OS === 'ios' ? 'center' : 'left',
-  }
-});
 
 export {
   createStackNavigatorScreenOptions,

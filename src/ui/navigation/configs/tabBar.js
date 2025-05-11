@@ -1,30 +1,27 @@
 // src/ui/navigation/configs/tabBar.js
 //
-// Streamlined tab bar configuration architecture
-// Eliminates conditional rendering paths and complex material integrations
+// Tab navigation configuration architecture with simplified implementation
+// Establishes deterministic styling with direct theme integration
 
 import React from 'react';
 import { Platform, StyleSheet } from 'react-native';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
-import theme from '../../theme';
+import navigationTheme from '../theme';
 
 /**
  * Tab Bar Visibility Logic
  * 
  * Simplified route-based visibility mechanism with deterministic behavior
  * Replaces complex dynamic calculations with straightforward conditionals
- * 
- * @param {Object} route - Current route object
- * @returns {Object|undefined} - Style object to hide tab bar or undefined
  */
 export const getTabBarVisibility = (route) => {
   // Routes where tab bar should be hidden
   const hiddenRoutes = ['CourseSelector', 'Tracker', 'ScorecardScreen'];
 
-  // Extract the active route name using React Navigation's utilities
+  // Extract active route using React Navigation's built-in utility
   const routeName = getFocusedRouteNameFromRoute(route);
   
-  // Simple conditional return with no branching logic
+  // Return visibility styling directly - no complex conditionals
   return (routeName && hiddenRoutes.includes(routeName)) 
     ? { display: 'none' } 
     : undefined;
@@ -33,26 +30,29 @@ export const getTabBarVisibility = (route) => {
 /**
  * Tab Navigator Configuration
  * 
- * Provides streamlined tab navigator options with deterministic styling
- * Eliminates material backdrop complexity and dynamic component generation
- * 
- * @returns {Object} - Tab navigator screen options
+ * Generates complete tab navigator screen options with simplified styling
+ * Eliminates custom backdrop materials and dynamic rendering paths
  */
 export const getTabNavigatorScreenOptions = () => {
   return {
-    // No header at tab navigator level - handled by child stack navigators
+    // No headers at tab level - handled by stack navigators
     headerShown: false,
     
-    // Consistent styling across platforms with minimal platform branching
+    // ARCHITECTURAL CHANGE: Direct theme property references
+    // Eliminates token transformation pipeline
     tabBarStyle: {
-      backgroundColor: theme.colors.background,
+      backgroundColor: navigationTheme.colors.background.tabBar,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: theme.colors.border,
+      borderTopColor: navigationTheme.colors.border.tabBar,
       
-      // Fixed height calculation with explicit safe area handling
-      height: Platform.OS === 'ios' ? 49 + 34 : 56, // Base height + bottom inset for iOS
+      // ARCHITECTURAL CHANGE: Fixed height calculation with direct platform check
+      // Replaces complex detection with simple Platform reference
+      height: Platform.OS === 'ios' 
+        ? navigationTheme.spacing.tabBar.height + navigationTheme.spacing.tabBar.bottomInset 
+        : navigationTheme.spacing.tabBar.height,
       
-      // Platform-appropriate elevation instead of complex shadow params
+      // ARCHITECTURAL CHANGE: Platform-specific elevation
+      // Replaces complex shadow calculations with direct values
       ...Platform.select({
         ios: {
           shadowColor: '#000',
@@ -66,14 +66,15 @@ export const getTabNavigatorScreenOptions = () => {
       }),
     },
     
-    // Standard tab styling from design system
-    tabBarActiveTintColor: theme.colors.primary,
-    tabBarInactiveTintColor: '#8E8E93',
+    // ARCHITECTURAL CHANGE: Direct color references 
+    // Eliminates complex token transformations
+    tabBarActiveTintColor: navigationTheme.colors.tint.tabBarActive,
+    tabBarInactiveTintColor: navigationTheme.colors.tint.tabBarInactive,
     
-    // Fixed label styling
+    // ARCHITECTURAL CHANGE: Direct typography values
+    // Eliminates dynamic optical sizing
     tabBarLabelStyle: {
-      fontSize: 10,
-      fontWeight: '500',
+      ...navigationTheme.typography.tabBar.label,
     },
   };
 };

@@ -4,7 +4,7 @@
 // Replaces complex token transformation system with direct references
 
 import { Platform } from 'react-native';
-import theme from '../../theme';
+import theme from '../theme'; // Change from ../../theme to ../theme
 
 /**
  * Navigation Theme System

@@ -1,12 +1,12 @@
 // src/navigation/MainNavigator.js
 //
-// Core navigation architecture with proper component hierarchy and delegation
+// Core navigation architecture with deterministic styling properties
+// Implements direct theme consumption with explicit property lineage
 
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
 import { Ionicons } from "@expo/vector-icons";
-import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import HomeStack from "./HomeStack";
 import RoundsScreen from "../screens/RoundScreen";
 import InsightsScreen from "../screens/InsightsScreen";
@@ -18,20 +18,20 @@ import {
   createInsightsStackConfig, 
   createProfileStackConfig 
 } from "../ui/navigation/configs/stack";
+import {
+  getTabBarVisibility,
+  getTabNavigatorScreenOptions
+} from "../ui/navigation/configs/tabBar";
 
-// Create stack navigators for tabs with nested navigation
+// Stack navigators for nested routing architecture
 const RoundsStack = createStackNavigator();
 const InsightsStack = createStackNavigator();
 const ProfileStack = createStackNavigator();
 
 /**
  * RoundsStackScreen Component
- * 
- * Local stack navigator definition that owns header rendering
- * for the rounds flow.
  */
 function RoundsStackScreen() {
-  // Get configuration from central system
   const config = createRoundsStackConfig();
   
   return (
@@ -52,12 +52,8 @@ function RoundsStackScreen() {
 
 /**
  * InsightsStackScreen Component
- * 
- * Local stack navigator definition that owns header rendering
- * for the insights flow.
  */
 function InsightsStackScreen() {
-  // Get configuration from central system
   const config = createInsightsStackConfig();
   
   return (
@@ -73,12 +69,8 @@ function InsightsStackScreen() {
 
 /**
  * ProfileStackScreen Component
- * 
- * Local stack navigator definition that owns header rendering
- * for the profile flow.
  */
 function ProfileStackScreen() {
-  // Get configuration from central system
   const config = createProfileStackConfig();
   
   return (
@@ -96,19 +88,15 @@ const Tab = createBottomTabNavigator();
 
 /**
  * MainNavigator Component
- * 
- * Root navigation architecture establishing clear delegation boundaries.
- * Tab navigator explicitly delegates header rendering responsibility
- * to child stack navigators through headerShown: false.
  */
 export default function MainNavigator() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        // ARCHITECTURAL BOUNDARY: Tab navigator explicitly delegates header ownership
+        // ARCHITECTURAL CHANGE: Tab navigator explicitly delegates header ownership
         headerShown: false,
         
-        // Icon mapping
+        // ARCHITECTURAL CHANGE: Direct icon mapping with simplified function
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
           
@@ -132,20 +120,16 @@ export default function MainNavigator() {
           return <Ionicons name={iconName} size={size} color={color} />;
         },
         
-        // Tab bar visibility logic for specific routes
-        tabBarStyle: (() => {
-          const routeName = getFocusedRouteNameFromRoute(route);
-          const hiddenRoutes = ['CourseSelector', 'Tracker', 'ScorecardScreen'];
-          
-          if (routeName && hiddenRoutes.includes(routeName)) {
-            return { display: 'none' };
-          }
-          return undefined;
-        })(),
+        // ARCHITECTURAL CHANGE: Direct tab bar visibility logic
+        tabBarStyle: getTabBarVisibility(route),
         
-        // Tab styling from theme
-        tabBarActiveTintColor: navigationTheme.tokens.colors.tint.tabBarActive,
-        tabBarInactiveTintColor: navigationTheme.tokens.colors.tint.tabBarInactive,
+        // ARCHITECTURAL CHANGE: Direct theme property references
+        // Eliminates token transformation pipeline
+        tabBarActiveTintColor: navigationTheme.colors.tint.tabBarActive,
+        tabBarInactiveTintColor: navigationTheme.colors.tint.tabBarInactive,
+        
+        // Apply additional screenOptions from consolidated function
+        ...getTabNavigatorScreenOptions()
       })}
     >
       <Tab.Screen

@@ -1,32 +1,33 @@
 // src/ui/navigation/configs/stack.js
 //
-// Stack navigator configuration focused on rendering consistency
-// Architectural foundation that ensures proper header/content separation
+// Stack navigator configuration architecture with deterministic styling
+// Implements direct theme consumption with explicit styling parameters
 
 import React from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import theme from '../../theme';
+import navigationTheme from '../theme';
 
 /**
- * Core navigation architecture with fixed rendering hierarchy
- * Eliminates unpredictable positioning and z-index conflicts
+ * Creates standardized stack navigator options with predictable styling
+ * Eliminates dynamic header backdrop materials and opacity calculations
  */
 const createStackNavigatorScreenOptions = () => {
   return {
     // ARCHITECTURAL CHANGE: Fixed header positioning
-    // This ensures deterministic rendering hierarchy rather than floating headers
+    // Ensures deterministic rendering with proper z-index management
     headerTransparent: false,
     
-    // ARCHITECTURAL CHANGE: Fixed header style with explicit dimensions
-    // This establishes a predictable component tree with proper spacing
+    // ARCHITECTURAL CHANGE: Direct theme property integration
+    // Eliminates property transformation pipeline
     headerStyle: {
-      backgroundColor: theme.colors.background,
-      height: Platform.OS === 'ios' ? 44 : 56,
+      backgroundColor: navigationTheme.colors.background.header,
+      height: navigationTheme.spacing.header.height,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: navigationTheme.colors.border.header,
       
-      // ARCHITECTURAL CHANGE: Standard elevation instead of complex shadow params
+      // ARCHITECTURAL CHANGE: Simplified shadow implementation
+      // Replaces complex dynamic calculations with direct platform values
       ...Platform.select({
         ios: {
           shadowColor: '#000',
@@ -40,31 +41,31 @@ const createStackNavigatorScreenOptions = () => {
       }),
     },
     
-    // Typography integration with design system
+    // ARCHITECTURAL CHANGE: Direct typography integration
+    // Replaces dynamic optical sizing with fixed parameters
     headerTitleStyle: {
-      fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
-      fontSize: 17,
-      fontWeight: '600',
-      color: theme.colors.text,
+      ...navigationTheme.typography.header.title,
     },
     
     headerTitleAlign: Platform.OS === 'ios' ? 'center' : 'left',
-    headerTintColor: theme.colors.primary,
+    headerTintColor: navigationTheme.colors.tint.header,
     
-    // ARCHITECTURAL CHANGE: Explicit card style for screen content
-    // This ensures consistent background rendering
+    // ARCHITECTURAL CHANGE: Simplified card styling
+    // Eliminates custom backdrop materials
     cardStyle: {
-      backgroundColor: theme.colors.background,
+      backgroundColor: navigationTheme.colors.background.card,
     },
     
-    // Animation parameters remain standard by platform
+    // ARCHITECTURAL CHANGE: Platform-appropriate gesture handling
+    // Eliminates complex detection in favor of direct platform check
     gestureEnabled: Platform.OS === 'ios',
     gestureDirection: 'horizontal',
   };
 };
 
 /**
- * Custom back button with standard styling parameters
+ * Custom back button with simplified implementation
+ * Eliminates complex platform detection in favor of direct checks
  */
 const CustomBackButton = ({ onPress, canGoBack }) => {
   if (!canGoBack) return null;
@@ -81,14 +82,14 @@ const CustomBackButton = ({ onPress, canGoBack }) => {
       <Ionicons
         name={Platform.OS === 'ios' ? "chevron-back" : "arrow-back"}
         size={Platform.OS === 'ios' ? 28 : 24}
-        color={theme.colors.primary}
+        color={navigationTheme.colors.tint.header}
       />
     </TouchableOpacity>
   );
 };
 
 /**
- * Standard header left component factory
+ * Header left component factory with simplified implementation
  */
 const createHeaderLeft = (navigation) => {
   return ({ canGoBack }) => {
@@ -104,7 +105,7 @@ const createHeaderLeft = (navigation) => {
 };
 
 // Stack configuration factories with reduced complexity
-// These maintain consistent header treatment across all stacks
+// Maintain API compatibility while simplifying implementation
 
 const createHomeStackConfig = () => {
   return {

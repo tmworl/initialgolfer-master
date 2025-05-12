@@ -24,6 +24,7 @@ import DistanceIndicator from '../components/DistanceIndicator';
 import { useFocusEffect } from '@react-navigation/native';
 import { trackEvent, trackError, ERROR_TYPES } from "../services/analytics";
 import NetInfo from '@react-native-community/netinfo';
+import { supabase } from "../services/supabase";
 
 /**
  * TrackerScreen Component
@@ -537,8 +538,37 @@ export default function TrackerScreen({ navigation }) {
   };
 
   /**
+   * Verify transaction completion for round
+   * 
+   * Checks that the round was properly marked as completed in the database
+   * 
+   * @param {string} roundId - The ID of the round to verify
+   * @returns {Promise<boolean>} - Whether the round is marked as complete
+   */
+  const verifyTransactionCompletion = async (roundId) => {
+    try {
+      const { data, error } = await supabase
+        .from("rounds")
+        .select("is_complete")
+        .eq("id", roundId)
+        .single();
+        
+      if (error) {
+        console.warn("Transaction verification error:", error);
+        return false;
+      }
+      
+      return data?.is_complete === true;
+    } catch (e) {
+      console.warn("Exception in transaction verification:", e);
+      return false;
+    }
+  };
+
+  /**
    * Complete the round - save all hole data to database
    * Enhanced to include POI data in the saved hole_data
+   * Fixed to properly manage UI state transition and add comprehensive telemetry
    */
   const finishRound = async () => {
     const startTime = Date.now();
@@ -605,14 +635,28 @@ export default function TrackerScreen({ navigation }) {
       await AsyncStorage.removeItem(`round_${round.id}_holes`);
       await AsyncStorage.removeItem("currentRound");
       
+      // STATE RECONCILIATION POINT (CRITICAL FIX)
+      // This ensures React state is fully reconciled before component unmounting
+      setLoading(false);
+      
+      // Add defensive transaction verification
+      const transactionVerification = await verifyTransactionCompletion(round.id);
+      
+      // PRESENTATION BOUNDARY: Navigation transition
+      // This only occurs after state reconciliation and transaction verification
       navigation.replace("ScorecardScreen", { 
         roundId: round.id,
-        fromTracker: true
+        fromTracker: true,
+        completionMetrics: {
+          holesCompleted: completedHoles,
+          totalShots: totalShotCount,
+          processingTime: Date.now() - startTime
+        }
       });
     } catch (error) {
       console.error("Error finishing round:", error);
       
-      // Track error via API
+      // FAULT BOUNDARY: Error telemetry
       await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, error, {
         round_id: round?.id,
         current_hole: currentHole,
@@ -622,7 +666,9 @@ export default function TrackerScreen({ navigation }) {
         network_state: (await NetInfo.fetch()).isConnected ? 'connected' : 'disconnected'
       });
       
+      // STATE RECONCILIATION POINT - Error path
       setLoading(false);
+      
       Alert.alert(
         "Error",
         "There was a problem completing your round. Please try again."

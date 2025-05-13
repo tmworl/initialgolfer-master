@@ -20,14 +20,22 @@ export const ERROR_TYPES = {
   ROUND_COMPLETION_ERROR: 'round_completion_error',
   DATA_PERSISTENCE_ERROR: 'data_persistence_error',
   API_ERROR: 'api_error',
-  NAVIGATION_ERROR: 'navigation_error'
+  NAVIGATION_ERROR: 'navigation_error',
+  // New auth-specific error types
+  AUTH_SESSION_ERROR: 'auth_session_error',
+  AUTH_PERMISSION_ERROR: 'auth_permission_error', 
+  AUTH_TOKEN_ERROR: 'auth_token_error',
+  AUTH_TIMEOUT_ERROR: 'auth_timeout_error'
 };
 
 // Event constants for consistent naming across application
 export const EVENTS = {
   ROUND_ENTITY_CREATED: 'round_entity_created',
   ROUND_ENTITY_DELETED: 'round_entity_deleted',
-  ERROR_OCCURRED: 'error_occurred' // New event type for error tracking
+  ERROR_OCCURRED: 'error_occurred', // New event type for error tracking
+  // Auth flow tracking events
+  AUTH_STATE_TRANSITION: 'auth_state_transition',
+  AUTH_OPERATION_TIMEOUT: 'auth_operation_timeout'
 };
 
 /**

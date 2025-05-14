@@ -15,6 +15,24 @@ const ERROR_CODES = {
   INTERNAL_ERROR: 'internal_server_error'
 };
 
+// Comprehensive error event types for unified telemetry architecture
+const ERROR_EVENT_TYPES = [
+  // Generic wrapper
+  'error_occurred',
+  
+  // Core error types
+  'round_completion_error',
+  'data_persistence_error',
+  'api_error',
+  'navigation_error',
+  
+  // Auth-specific error types
+  'auth_session_error',
+  'auth_permission_error',
+  'auth_token_error',
+  'auth_timeout_error'
+];
+
 serve(async (req) => {
   // CORS handling with appropriate security headers
   if (req.method === "OPTIONS") {
@@ -117,6 +135,36 @@ serve(async (req) => {
       processing_instance: Deno.env.get("DENO_DEPLOYMENT_ID") || "development"
     };
     
+    // ENHANCED ERROR DETECTION LOGIC
+    // Detect if this is an error event - either by name or embedded type
+    const isErrorEvent = ERROR_EVENT_TYPES.includes(event) || 
+                        (event === 'error_occurred' && properties.type && 
+                         ERROR_EVENT_TYPES.includes(properties.type));
+    
+    if (isErrorEvent) {
+      // Extract actual error type - either from event name or type property
+      const actualErrorType = (event === 'error_occurred') ? properties.type : event;
+      
+      console.log(`Processing error telemetry: ${actualErrorType}`);
+      
+      // Add detailed error metadata for all error types
+      enrichedProperties = {
+        ...enrichedProperties,
+        error_type: actualErrorType,
+        server_environment: Deno.env.get("ENVIRONMENT") || "production",
+        processing_region: Deno.env.get("DENO_REGION") || "unknown",
+        error_event: true
+      };
+      
+      // Enhanced logging for critical errors
+      console.log(`Error telemetry details: ${JSON.stringify({
+        error_type: actualErrorType,
+        message: properties.message || "No message provided",
+        operation: properties.operation || "Unknown operation",
+        timestamp: properties.timestamp || new Date().toISOString()
+      })}`);
+    }
+    
     // Construct PostHog payload
     const posthogPayload = {
       api_key: POSTHOG_API_KEY,
@@ -137,29 +185,6 @@ serve(async (req) => {
           headers: { "Content-Type": "application/json" } 
         }
       );
-    }
-    
-    // Check for critical error events and add additional metadata
-    if (event === 'round_completion_error' || 
-        event === 'data_persistence_error' || 
-        event === 'api_error') {
-      
-      console.log(`Forwarding critical error event to PostHog: ${event}`);
-      
-      // Tag error events with additional metadata
-      enrichedProperties = {
-        ...enrichedProperties,
-        server_environment: Deno.env.get("ENVIRONMENT") || "production",
-        processing_region: Deno.env.get("DENO_REGION") || "unknown",
-        error_event: true
-      };
-      
-      // Additional logging for critical errors
-      console.log(`Critical error details: ${JSON.stringify({
-        error_type: event,
-        message: properties.message,
-        round_id: properties.round_id
-      })}`);
     }
     
     // Forward to PostHog API
@@ -183,7 +208,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true,
-        event_id: crypto.randomUUID() // Include event ID for client correlation
+        event_id: crypto.randomUUID(), // Include event ID for client correlation
+        enhanced_telemetry: isErrorEvent // Flag when enhanced telemetry was applied
       }),
       { 
         headers: { 

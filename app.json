@@ -21,7 +21,7 @@
     "icon": "./assets/icon.png",
     "android": {
       "package": "com.daybeam.golfimprove",
-      "icon": "./assets/android/icon.png",
+      "icon": "./assets/android/icon.png"
     },
     "ios": {
       "bundleIdentifier": "com.daybeam.golfimprove",
@@ -31,6 +31,9 @@
         "NSLocationAlwaysUsageDescription": "This app uses your location to calculate distances while you play golf."
       },
       "icon": "./assets/ios/icon.png"
-    }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

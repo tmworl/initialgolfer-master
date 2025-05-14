@@ -30,7 +30,24 @@ const ERROR_EVENT_TYPES = [
   'auth_session_error',
   'auth_permission_error',
   'auth_token_error',
-  'auth_timeout_error'
+  'auth_timeout_error',
+  
+  // Transaction error types
+  'transaction_error'
+];
+
+// Add the new TRANSACTION_EVENT_TYPES array
+const TRANSACTION_EVENT_TYPES = [
+  'transaction_started',
+  'transaction_committed',
+  'transaction_completed',
+  'transaction_recovered',
+  'transaction_failed',
+  'round_completion_started',
+  'round_completion_db_committed',
+  'round_completion_succeeded',
+  'round_completion_recovery_started',
+  'round_completion_recovery_succeeded'
 ];
 
 serve(async (req) => {
@@ -135,12 +152,13 @@ serve(async (req) => {
       processing_instance: Deno.env.get("DENO_DEPLOYMENT_ID") || "development"
     };
     
-    // ENHANCED ERROR DETECTION LOGIC
-    // Detect if this is an error event - either by name or embedded type
+    // ENHANCED ERROR AND TRANSACTION DETECTION LOGIC
     const isErrorEvent = ERROR_EVENT_TYPES.includes(event) || 
                         (event === 'error_occurred' && properties.type && 
                          ERROR_EVENT_TYPES.includes(properties.type));
-    
+                         
+    const isTransactionEvent = TRANSACTION_EVENT_TYPES.includes(event);
+
     if (isErrorEvent) {
       // Extract actual error type - either from event name or type property
       const actualErrorType = (event === 'error_occurred') ? properties.type : event;
@@ -161,6 +179,34 @@ serve(async (req) => {
         error_type: actualErrorType,
         message: properties.message || "No message provided",
         operation: properties.operation || "Unknown operation",
+        timestamp: properties.timestamp || new Date().toISOString()
+      })}`);
+    }
+
+    // Add transaction event handling
+    if (isTransactionEvent) {
+      // Extract transaction type and phase
+      const transactionType = event.includes('_') ? event.split('_')[0] : 'generic';
+      const transactionPhase = event.split('_').slice(-1)[0];
+      
+      console.log(`Processing transaction telemetry: ${transactionType} - ${transactionPhase}`);
+      
+      // Add transaction metadata
+      enrichedProperties = {
+        ...enrichedProperties,
+        transaction_type: transactionType,
+        transaction_phase: transactionPhase,
+        server_environment: Deno.env.get("ENVIRONMENT") || "production",
+        processing_region: Deno.env.get("DENO_REGION") || "unknown",
+        transaction_event: true
+      };
+      
+      // Enhanced logging for transaction events
+      console.log(`Transaction telemetry details: ${JSON.stringify({
+        transaction_id: properties.transaction_id || "No transaction ID provided",
+        type: transactionType,
+        phase: transactionPhase,
+        entity_id: properties.round_id || properties.entity_id || "Unknown entity",
         timestamp: properties.timestamp || new Date().toISOString()
       })}`);
     }

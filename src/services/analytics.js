@@ -1,234 +1,187 @@
 // src/services/analytics.js
+// 
+// Enhanced analytics service with improved auth event tracking
+// Fully integrated with PostHog analytics via the track-analytics edge function
 
-import { supabase } from './supabase';
+import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
+import { supabase } from './supabase'; // Import Supabase client
 
-// Configuration
-const EVENT_BUFFER_KEY = '@GolfApp:analytics_buffer';
-const APP_VERSION = Constants.manifest?.version || '1.1.4';
+// Initialize analytics state
+let initialized = false;
+let userId = null;
+let deviceInfo = null;
 
-// Singleton state
-let currentUserId = null;
-let eventBuffer = [];
-let isInitialized = false;
-
-// Error tracking constants
+// Define error type constants for tracking
 export const ERROR_TYPES = {
   ROUND_COMPLETION_ERROR: 'round_completion_error',
   DATA_PERSISTENCE_ERROR: 'data_persistence_error',
   API_ERROR: 'api_error',
   NAVIGATION_ERROR: 'navigation_error',
-  // New auth-specific error types
   AUTH_SESSION_ERROR: 'auth_session_error',
-  AUTH_PERMISSION_ERROR: 'auth_permission_error', 
+  AUTH_PERMISSION_ERROR: 'auth_permission_error',
   AUTH_TOKEN_ERROR: 'auth_token_error',
   AUTH_TIMEOUT_ERROR: 'auth_timeout_error'
 };
 
-// Event constants for consistent naming across application
+// Define event type constants for tracking
 export const EVENTS = {
-  ROUND_ENTITY_CREATED: 'round_entity_created',
-  ROUND_ENTITY_DELETED: 'round_entity_deleted',
-  ERROR_OCCURRED: 'error_occurred', // New event type for error tracking
-  // Auth flow tracking events
+  // Auth events
+  AUTH_STATE_CHANGED: 'auth_state_changed',
   AUTH_STATE_TRANSITION: 'auth_state_transition',
-  AUTH_OPERATION_TIMEOUT: 'auth_operation_timeout'
+  
+  // Round events
+  ROUND_ENTITY_CREATED: 'round_entity_created',
+  ROUND_COMPLETED: 'round_completed',
+  ROUND_ABANDONED: 'round_abandoned',
+  
+  // Data events
+  HOLE_DATA_SAVED: 'hole_data_saved',
+  ROUND_DATA_FETCHED: 'round_data_fetched',
+  
+  // Transaction events
+  TRANSACTION_STARTED: 'transaction_started',
+  TRANSACTION_COMMITTED: 'transaction_committed',
+  TRANSACTION_COMPLETED: 'transaction_completed',
+  TRANSACTION_RECOVERED: 'transaction_recovered',
+  TRANSACTION_FAILED: 'transaction_failed',
+  
+  // Insights events
+  INSIGHTS_GENERATED: 'insights_generated'
 };
 
 /**
- * Initialize analytics service with user identity
+ * Initialize analytics with user information
+ * Sets up device metadata for consistent tracking
  * 
- * @param {string} userId - User identifier
+ * @param {string} id - User ID for analytics tracking
  */
-export async function initAnalytics(userId) {
-  if (!userId) {
-    console.warn('[Analytics] Invalid user ID provided for initialization');
+export const initAnalytics = async (id) => {
+  if (!id) return;
+  
+  userId = id;
+  
+  // Collect device information for tracking context
+  deviceInfo = {
+    model: Device.modelName,
+    deviceType: Device.deviceType,
+    osName: Platform.OS,
+    osVersion: Platform.Version,
+    appVersion: Device.osVersion,
+    brand: Device.brand
+  };
+  
+  initialized = true;
+  
+  // Track analytics initialization
+  await trackEvent('analytics_initialized', {
+    device_info: deviceInfo
+  });
+};
+
+/**
+ * Track an error event
+ * 
+ * ARCHITECTURAL REFACTORING:
+ * - Restructured to maintain critical error tracking
+ * - Removed token refresh error tracking
+ * 
+ * @param {string} type - Error type constant
+ * @param {Error} error - Error object
+ * @param {Object} metadata - Additional error context
+ */
+export const trackError = async (type, error, metadata = {}) => {
+  if (!initialized) {
+    console.error(`[Analytics] Error tracked before initialization: ${type}`);
+    console.error(error);
     return;
   }
   
-  currentUserId = userId;
-  isInitialized = true;
-  
-  console.log(`[Analytics] Initialized for user: ${userId}`);
-  
-  await restoreEventBuffer();
-  processEventBuffer();
-}
-
-/**
- * Track error events via the existing tracking infrastructure
- * 
- * @param {string} errorType - The type of error from ERROR_TYPES
- * @param {Error|string} error - The error object or message
- * @param {Object} context - Additional context about the error
- * @returns {Promise<boolean>} Success indicator
- */
-export async function trackError(errorType, error, context = {}) {
-  if (!ERROR_TYPES[errorType]) {
-    console.warn('[Analytics] Invalid error type:', errorType);
-    return false;
-  }
-
-  // Extract basic error info
-  const errorInfo = {
-    message: error?.message || String(error),
-    stack: error?.stack,
-    name: error?.name || 'Error',
-    type: errorType
-  };
-  
-  // Create the error event payload
-  const properties = {
-    ...context,
-    ...errorInfo,
-    timestamp: Date.now(),
-    app_version: APP_VERSION
-  };
-  
-  // Use existing trackEvent infrastructure
-  return await trackEvent(EVENTS.ERROR_OCCURRED, properties);
-}
-
-/**
- * Track an event via Supabase Edge Function
- * 
- * @param {string} eventName - Event name to track
- * @param {object} properties - Event properties
- * @returns {Promise<boolean>} Success indicator
- */
-export async function trackEvent(eventName, properties = {}) {
-  if (!eventName) {
-    console.error('[Analytics] Invalid event name');
-    return false;
-  }
-  
-  const eventData = {
-    name: eventName,
-    properties: {
-      ...properties,
-      distinct_id: currentUserId,
-      app_version: APP_VERSION,
-      platform: Platform.OS,
-      platform_version: Platform.Version,
-      environment: __DEV__ ? 'development' : 'production',
-      client_timestamp: new Date().toISOString()
-    },
-    timestamp: Date.now()
-  };
-  
-  console.log(`[Analytics] Event: ${eventName}`, properties);
-  
-  if (!isInitialized || !currentUserId) {
-    console.log(`[Analytics] Not initialized, buffering event: ${eventName}`);
-    return bufferEvent(eventData);
-  }
-  
-  const networkState = await NetInfo.fetch();
-  
-  if (!networkState.isConnected) {
-    console.log(`[Analytics] Device offline, buffering event: ${eventName}`);
-    return bufferEvent(eventData);
-  }
-  
-  return sendEvent(eventData);
-}
-
-/**
- * Send event to PostHog via Edge Function
- * 
- * @param {object} eventData - Event data to send
- * @returns {Promise<boolean>} Success indicator
- */
-async function sendEvent(eventData) {
   try {
-    const { data, error } = await supabase.functions.invoke('track-analytics', {
-      body: { 
-        event: eventData.name, 
-        properties: eventData.properties 
-      }
-    });
-    
-    if (error) {
-      console.error(`[Analytics] Error sending event:`, error);
-      bufferEvent(eventData);
-      return false;
+    // Don't track TOKEN_REFRESHED errors - architectural change
+    if (metadata.auth_event === 'TOKEN_REFRESHED') {
+      return;
     }
     
-    return true;
+    // Prepare error data
+    const errorData = {
+      error_type: type,
+      message: error.message,
+      stack: error.stack,
+      ...metadata,
+      device_info: deviceInfo,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.error(`[Analytics] Error: ${type}`, errorData);
+    
+    // Send to server
+    await sendToAnalyticsService('error_occurred', errorData);
+    
   } catch (err) {
-    console.error(`[Analytics] Failed to send event:`, err);
-    bufferEvent(eventData);
-    return false;
+    // Fallback error logging if analytics fails
+    console.error('Failed to track error:', err);
+    console.error('Original error:', { type, message: error.message, metadata });
   }
-}
+};
 
 /**
- * Buffer event for later sending
+ * Track an application event
  * 
- * @param {object} eventData - Event to buffer
- * @returns {Promise<boolean>} Success indicator
+ * ARCHITECTURAL REFACTORING:
+ * - Removed TOKEN_REFRESHED event tracking
+ * - Added support for transaction lifecycle events
+ * 
+ * @param {string} eventName - Event name
+ * @param {Object} properties - Event properties
  */
-async function bufferEvent(eventData) {
-  try {
-    eventBuffer.push(eventData);
-    await AsyncStorage.setItem(EVENT_BUFFER_KEY, JSON.stringify(eventBuffer));
-    return true;
-  } catch (error) {
-    console.error('[Analytics] Failed to buffer event:', error);
-    return false;
-  }
-}
-
-/**
- * Restore event buffer from persistent storage
- */
-async function restoreEventBuffer() {
-  try {
-    const storedBuffer = await AsyncStorage.getItem(EVENT_BUFFER_KEY);
-    if (storedBuffer) {
-      eventBuffer = JSON.parse(storedBuffer);
-      console.log(`[Analytics] Restored ${eventBuffer.length} buffered events`);
-    }
-  } catch (error) {
-    console.error('[Analytics] Failed to restore event buffer:', error);
-  }
-}
-
-/**
- * Process buffered events
- */
-async function processEventBuffer() {
-  if (!isInitialized || eventBuffer.length === 0) {
+export const trackEvent = async (eventName, properties = {}) => {
+  // Skip tracking for TOKEN_REFRESHED events - architectural change
+  if (eventName === 'auth_state_changed' && properties.event === 'TOKEN_REFRESHED') {
     return;
   }
   
-  console.log(`[Analytics] Processing ${eventBuffer.length} buffered events`);
-  
-  const networkState = await NetInfo.fetch();
-  if (!networkState.isConnected) {
-    console.log('[Analytics] Device offline, cannot process buffer');
-    return;
+  try {
+    // Add common properties
+    const eventProperties = {
+      ...properties,
+      device_info: deviceInfo,
+      platform: Platform.OS,
+      distinct_id: userId || 'anonymous',
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log(`[Analytics] Event: ${eventName}`, eventProperties);
+    
+    // Send to server
+    await sendToAnalyticsService(eventName, eventProperties);
+    
+  } catch (err) {
+    console.error(`Failed to track event ${eventName}:`, err);
   }
-  
-  const successfulEvents = [];
-  
-  for (const event of eventBuffer) {
-    try {
-      const success = await sendEvent(event);
-      if (success) {
-        successfulEvents.push(event);
-      }
-    } catch (error) {
-      console.error(`[Analytics] Error processing buffered event:`, error);
-    }
+};
+
+/**
+ * Send event to analytics service
+ * 
+ * @param {string} event - Event name
+ * @param {Object} properties - Event properties
+ */
+const sendToAnalyticsService = async (event, properties) => {
+  try {
+    // Use Supabase edge function for analytics
+    await supabase.functions.invoke('track-analytics', {
+      body: { event, properties }
+    });
+  } catch (error) {
+    console.error('Error sending to analytics service:', error);
   }
-  
-  if (successfulEvents.length > 0) {
-    eventBuffer = eventBuffer.filter(event => !successfulEvents.includes(event));
-    await AsyncStorage.setItem(EVENT_BUFFER_KEY, JSON.stringify(eventBuffer));
-    console.log(`[Analytics] Processed ${successfulEvents.length} buffered events, ${eventBuffer.length} remaining`);
-  }
-}
+};
+
+export default {
+  initAnalytics,
+  trackEvent,
+  trackError,
+  ERROR_TYPES,
+  EVENTS
+};

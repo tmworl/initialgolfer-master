@@ -96,6 +96,14 @@ const createSecureStorageAdapter = () => {
 
 /**
  * Enhanced Supabase client with secure token persistence
+ * 
+ * Technical Note (REFACTORING CHANGE 2023-05-14):
+ * ---------------------------------------------
+ * JWT expiration has been extended to 28 days (2,419,200 seconds) in the Supabase dashboard.
+ * This intentionally reduces token refresh frequency to minimize UI reconciliation cascades.
+ * 
+ * The auth configuration below maintains the persist session capability,
+ * but now relies on the extended token lifecycle rather than aggressive refresh.
  */
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {

@@ -54,7 +54,11 @@ const checkEmailVerification = (userData) => {
 /**
  * AuthProvider Component
  * 
- * Enhanced with context-aware session management and event differentiation
+ * ARCHITECTURAL REFACTORING: 
+ * - Removed TOKEN_REFRESHED event processing from state updates
+ * - Simplified onAuthStateChange to only process critical auth events
+ * - Removed permission reloading on token refresh
+ * - Established cleaner auth boundaries between state changes
  */
 export const AuthProvider = ({ children }) => {
   // Authentication state
@@ -263,6 +267,10 @@ export const AuthProvider = ({ children }) => {
   /**
    * Authentication initialization and session restoration
    * Instrumented with analytics and timeout protection
+   * 
+   * ARCHITECTURAL REFACTORING: 
+   * - Updated onAuthStateChange to only process SIGNED_IN and SIGNED_OUT events
+   * - Removed TOKEN_REFRESHED events from state update triggers
    */
   useEffect(() => {
     const initAuth = async () => {
@@ -375,13 +383,10 @@ export const AuthProvider = ({ children }) => {
     /**
      * Auth state change subscription
      * 
-     * This synchronizes the UI with auth state changes from any source:
-     * - Manual login/logout
-     * - Session restoration
-     * - Token refresh
-     * - External auth events (deep links)
-     * 
-     * Enhanced with context-aware event processing via SessionManager
+     * ARCHITECTURAL REFACTORING:
+     * - Only process SIGNED_IN and SIGNED_OUT events
+     * - Do not process TOKEN_REFRESHED events
+     * - Maintain auth event handling for critical auth transitions
      */
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("Auth state changed:", event);
@@ -392,15 +397,15 @@ export const AuthProvider = ({ children }) => {
         return;
       }
       
-      trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-        from_state: 'auth_change_detected',
-        to_state: session ? 'session_available' : 'session_removed',
-        auth_event: event,
-        timestamp: Date.now()
-      });
-      
-      // Process critical auth events with full state updates
+      // Only process critical auth events - ignore TOKEN_REFRESHED
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
+          from_state: 'auth_change_detected',
+          to_state: session ? 'session_available' : 'session_removed',
+          auth_event: event,
+          timestamp: Date.now()
+        });
+        
         // Update internal state based on auth changes
         if (session?.user) {
           setUser(session.user);
@@ -423,19 +428,8 @@ export const AuthProvider = ({ children }) => {
           setEmailVerified(false);
           setUserPermissions([]);
         }
-      } else if (event === 'TOKEN_REFRESHED') {
-        // Minimal update for token refresh - just update the token without cascading reloads
-        if (session?.user) {
-          // Update user state but don't trigger permission reload or analytics reinit
-          setUser(session.user);
-          
-          // Update verified state if it changed
-          const isVerified = checkEmailVerification(session.user);
-          if (isVerified !== emailVerified) {
-            setEmailVerified(isVerified);
-          }
-        }
       }
+      // Explicitly ignore TOKEN_REFRESHED events - do not update state
     });
 
     // Deep link handling setup

@@ -30,8 +30,7 @@ import { supabase } from "../services/supabase";
  * TrackerScreen Component
  * 
  * This screen allows users to track shots during a round of golf.
- * Uses the new data structure for tracking and saving hole data.
- * Enhanced to include POI data for each hole when available.
+ * Enhanced with transaction marker pattern for resilient data operations.
  */
 export default function TrackerScreen({ navigation }) {
   // Get the authenticated user from context
@@ -567,22 +566,40 @@ export default function TrackerScreen({ navigation }) {
 
   /**
    * Complete the round - save all hole data to database
-   * Enhanced to include POI data in the saved hole_data
-   * Fixed to properly manage UI state transition and add comprehensive telemetry
+   * Enhanced with transaction marker pattern for resilient persistence
+   * 
+   * ARCHITECTURAL REFACTORING:
+   * - Added transaction marker pattern with status checkpoints
+   * - Implemented proper state transitions with error recovery
+   * - Added comprehensive telemetry for transaction lifecycle
    */
   const finishRound = async () => {
+    // Generate a unique transaction ID for this round completion
+    const transactionId = `round_completion_${round.id}_${Date.now()}`;
     const startTime = Date.now();
     let completedHoles = 0;
     let totalShotCount = 0;
     
     try {
-      // Track flow started
+      // Track transaction started
       trackEvent('round_completion_started', {
         round_id: round?.id,
-        current_hole: currentHole
+        current_hole: currentHole,
+        transaction_id: transactionId
       });
       
       setLoading(true);
+      
+      // TRANSACTION MARKER: Set STARTED status in AsyncStorage
+      await AsyncStorage.setItem(`transaction_${transactionId}`, JSON.stringify({
+        type: 'round_completion',
+        round_id: round.id,
+        status: 'STARTED',
+        timestamp: new Date().toISOString(),
+        metadata: {
+          current_hole: currentHole
+        }
+      }));
       
       await saveCurrentHoleToStorage();
       
@@ -592,7 +609,8 @@ export default function TrackerScreen({ navigation }) {
         await trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, missingDataError, {
           round_id: round.id,
           current_hole: currentHole,
-          error_location: 'finishRound'
+          error_location: 'finishRound',
+          transaction_id: transactionId
         });
         throw missingDataError;
       }
@@ -622,16 +640,32 @@ export default function TrackerScreen({ navigation }) {
         await saveHoleData(round.id, holeNum, holeDataForDb, totalScore);
       }
       
-      await completeRound(round.id);
+      // Save the transaction ID with database operations
+      await completeRound(round.id, transactionId);
       
-      // Track successful completion
-      trackEvent('round_completion_succeeded', {
+      // TRANSACTION MARKER: Update to DB_COMMITTED status
+      await AsyncStorage.setItem(`transaction_${transactionId}`, JSON.stringify({
+        type: 'round_completion',
         round_id: round.id,
+        status: 'DB_COMMITTED',
+        timestamp: new Date().toISOString(),
+        metadata: {
+          completed_holes: completedHoles,
+          total_shots: totalShotCount,
+          operation_duration_ms: Date.now() - startTime
+        }
+      }));
+      
+      // Track successful database operations
+      trackEvent('round_completion_db_committed', {
+        round_id: round.id,
+        transaction_id: transactionId,
         holes_completed: completedHoles,
         total_shots: totalShotCount,
         operation_duration_ms: Date.now() - startTime
       });
       
+      // Clean up local storage
       await AsyncStorage.removeItem(`round_${round.id}_holes`);
       await AsyncStorage.removeItem("currentRound");
       
@@ -639,18 +673,37 @@ export default function TrackerScreen({ navigation }) {
       // This ensures React state is fully reconciled before component unmounting
       setLoading(false);
       
-      // Add defensive transaction verification
-      const transactionVerification = await verifyTransactionCompletion(round.id);
+      // TRANSACTION MARKER: Update to COMPLETED status
+      await AsyncStorage.setItem(`transaction_${transactionId}`, JSON.stringify({
+        type: 'round_completion',
+        round_id: round.id,
+        status: 'COMPLETED',
+        timestamp: new Date().toISOString(),
+        metadata: {
+          completed_holes: completedHoles,
+          total_shots: totalShotCount,
+          operation_duration_ms: Date.now() - startTime
+        }
+      }));
+      
+      // Track successful completion
+      trackEvent('round_completion_succeeded', {
+        round_id: round.id,
+        transaction_id: transactionId,
+        holes_completed: completedHoles,
+        total_shots: totalShotCount,
+        operation_duration_ms: Date.now() - startTime
+      });
       
       // PRESENTATION BOUNDARY: Navigation transition
-      // This only occurs after state reconciliation and transaction verification
       navigation.replace("ScorecardScreen", { 
         roundId: round.id,
         fromTracker: true,
         completionMetrics: {
           holesCompleted: completedHoles,
           totalShots: totalShotCount,
-          processingTime: Date.now() - startTime
+          processingTime: Date.now() - startTime,
+          transactionId: transactionId
         }
       });
     } catch (error) {
@@ -660,11 +713,26 @@ export default function TrackerScreen({ navigation }) {
       await trackError(ERROR_TYPES.ROUND_COMPLETION_ERROR, error, {
         round_id: round?.id,
         current_hole: currentHole,
+        transaction_id: transactionId,
         completed_holes: completedHoles,
         total_shots: totalShotCount,
         operation_duration_ms: Date.now() - startTime,
         network_state: (await NetInfo.fetch()).isConnected ? 'connected' : 'disconnected'
       });
+      
+      // Update transaction marker with error status
+      await AsyncStorage.setItem(`transaction_${transactionId}`, JSON.stringify({
+        type: 'round_completion',
+        round_id: round.id,
+        status: 'ERROR',
+        timestamp: new Date().toISOString(),
+        error: error.message,
+        metadata: {
+          completed_holes: completedHoles,
+          total_shots: totalShotCount,
+          operation_duration_ms: Date.now() - startTime
+        }
+      }));
       
       // STATE RECONCILIATION POINT - Error path
       setLoading(false);

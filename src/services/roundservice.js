@@ -170,14 +170,15 @@ export const getRoundHoleData = async (round_id) => {
 
 /**
  * Complete a round by updating its is_complete flag and calculating final statistics.
- * Works with the new shots data structure.
+ * Enhanced with transaction marker support for resilient completion.
  * 
  * @param {string} round_id - The ID of the round to complete.
+ * @param {string} transaction_id - Optional transaction ID for tracking.
  * @returns {object} The updated round record.
  */
-export const completeRound = async (round_id) => {
+export const completeRound = async (round_id, transaction_id = null) => {
   const startTime = Date.now();
-  const context = { round_id };
+  const context = { round_id, transaction_id };
   
   try {
     // Fetch round data
@@ -237,14 +238,25 @@ export const completeRound = async (round_id) => {
     
     const score = grossShots - coursePar;
     
+    // Update round with completion data and transaction metadata
+    const updateData = { 
+      is_complete: true,
+      gross_shots: grossShots,
+      score: score
+    };
+    
+    // Add transaction metadata if provided
+    if (transaction_id) {
+      updateData.metadata = {
+        transaction_id,
+        completion_timestamp: new Date().toISOString()
+      };
+    }
+    
     // Update round with completion data
     const { data, error } = await supabase
       .from("rounds")
-      .update({ 
-        is_complete: true,
-        gross_shots: grossShots,
-        score: score
-      })
+      .update(updateData)
       .eq("id", round_id)
       .select();
 
@@ -271,6 +283,7 @@ export const completeRound = async (round_id) => {
       score,
       course_par: coursePar,
       holes_played: holeRecords.length,
+      transaction_id,
       operation_duration_ms: duration
     });
     
@@ -281,7 +294,8 @@ export const completeRound = async (round_id) => {
       const insightsPromise = supabase.functions.invoke('analyze-golf-performance', {
         body: { 
           userId: roundData.profile_id,
-          roundId: round_id
+          roundId: round_id,
+          transactionId: transaction_id
         }
       });
 
@@ -301,6 +315,7 @@ export const completeRound = async (round_id) => {
             trackEvent(EVENTS.INSIGHTS_GENERATED, {
               success: true,
               round_id,
+              transaction_id,
               insights_count: insightsData?.insights?.length || 0
             });
           }

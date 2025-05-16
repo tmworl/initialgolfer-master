@@ -1,8 +1,11 @@
 // src/services/supabase.js
+//
+// Enhanced authentication persistence layer
+// Migrated from SecureStore to AsyncStorage for improved initialization reliability
 
-import { createClient } from "@supabase/supabase-js";
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createClient } from "@supabase/supabase-js";
 import 'react-native-url-polyfill/auto';
 
 // Project credentials
@@ -10,81 +13,35 @@ const SUPABASE_URL = "https://mxqhgktcdmymmwbsbfws.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14cWhna3RjZG15bW13YnNiZndzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg1OTIxMTMsImV4cCI6MjA1NDE2ODExM30.7ElhxIdCyfvZEL038YKqoKXUo8P9FQ_TF1EbpiKdPzA";
 
 /**
- * Storage subsystem health verification
- * Performs a storage subsystem integrity check to validate operational status
+ * AsyncStorage adapter with optimized error handling
+ * Eliminates initialization race conditions and improves startup performance
  */
-const verifyStorageSubsystem = async () => {
-  const testKey = `storage.healthcheck.${Date.now()}`;
-  const testValue = `verify-${Date.now()}`;
-  
-  try {
-    // Attempt write-read-delete cycle to verify subsystem integrity
-    await SecureStore.setItemAsync(testKey, testValue);
-    const retrieved = await SecureStore.getItemAsync(testKey);
-    await SecureStore.deleteItemAsync(testKey);
-    
-    // Verify data integrity
-    const subsystemHealthy = retrieved === testValue;
-    console.log(`Storage subsystem health check: ${subsystemHealthy ? 'PASSED' : 'FAILED'}`);
-    return subsystemHealthy;
-  } catch (error) {
-    console.error('Storage subsystem verification failed:', error);
-    return false;
-  }
-};
-
-/**
- * Enhanced secure storage adapter with comprehensive error handling
- * Provides a robust bridge between Supabase auth and secure storage
- */
-const createSecureStorageAdapter = () => {
-  // Perform storage health check at initialization
-  verifyStorageSubsystem().catch(e => 
-    console.error('Storage initialization check failed:', e)
-  );
-  
-  // Centralized error handler with telemetry instrumentation
-  const handleStorageError = (operation, key, error) => {
-    // Generate diagnostic signature for error analysis
-    const errorSignature = {
-      operation,
-      key: key.substring(0, 15) + '...', // Truncate for privacy
-      errorName: error.name,
-      errorMessage: error.message,
-      errorCode: error.code,
-      timestamp: new Date().toISOString(),
-      platform: Platform.OS,
-      platformVersion: Platform.Version
-    };
-    
-    console.error(`[SecureStorage:${operation}] Operation failed:`, errorSignature);
-    
-    // Return appropriate fallback value based on operation type
-    return operation === 'get' ? null : undefined;
-  };
-
+const createAsyncStorageAdapter = () => {
   return {
     getItem: async (key) => {
       try {
-        return await SecureStore.getItemAsync(key);
+        return await AsyncStorage.getItem(key);
       } catch (error) {
-        return handleStorageError('get', key, error);
+        console.error(`[AsyncStorage] Failed to retrieve key ${key.substring(0, 15)}...`, error);
+        return null;
       }
     },
     
     setItem: async (key, value) => {
       try {
-        return await SecureStore.setItemAsync(key, value);
+        return await AsyncStorage.setItem(key, value);
       } catch (error) {
-        return handleStorageError('set', key, error);
+        console.error(`[AsyncStorage] Failed to store key ${key.substring(0, 15)}...`, error);
+        return undefined;
       }
     },
     
     removeItem: async (key) => {
       try {
-        return await SecureStore.deleteItemAsync(key);
+        return await AsyncStorage.removeItem(key);
       } catch (error) {
-        return handleStorageError('remove', key, error);
+        console.error(`[AsyncStorage] Failed to remove key ${key.substring(0, 15)}...`, error);
+        return undefined;
       }
     }
   };
@@ -114,7 +71,7 @@ export const resetAuthStorage = async () => {
   
   for (const key of AUTH_KEYS) {
     try {
-      await SecureStore.deleteItemAsync(key);
+      await AsyncStorage.removeItem(key);
       successCount++;
       operationResults.push({ key, success: true });
     } catch (error) {
@@ -143,12 +100,12 @@ export const resetAuthStorage = async () => {
 };
 
 /**
- * Enhanced Supabase client with unified secure token persistence
- * Standardizes on expo-secure-store for cross-platform token storage
+ * Enhanced Supabase client with unified AsyncStorage persistence
+ * Eliminates Keychain initialization issues while maintaining token lifecycle
  */
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: createSecureStorageAdapter(),
+    storage: createAsyncStorageAdapter(),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false

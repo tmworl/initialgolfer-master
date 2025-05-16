@@ -2,46 +2,15 @@
 
 import React, { createContext, useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Linking } from "react-native";
+import { Linking, AppState } from "react-native";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { supabase } from "../services/supabase";
-import { initAnalytics, trackError as analyticsTrackError, trackEvent as analyticsTrackEvent } from "../services/analytics";
-import SessionManager from "../services/SessionManager";
 
 // Create navigation reference for cross-component navigation capabilities
 export const navigationRef = createNavigationContainerRef();
 
 // Create an authentication context
 export const AuthContext = createContext();
-
-// Auth event tracking constants
-const AUTH_EVENTS = {
-  AUTH_STATE_TRANSITION: 'auth_state_transition'
-};
-
-const AUTH_ERROR_TYPES = {
-  AUTH_TIMEOUT_ERROR: 'auth_timeout_error',
-  AUTH_SESSION_ERROR: 'auth_session_error',
-  AUTH_PERMISSION_ERROR: 'auth_permission_error',
-  AUTH_TOKEN_ERROR: 'auth_token_error'
-};
-
-// Utility functions that connect to the analytics service
-const trackError = (type, error, metadata = {}) => {
-  console.error(`[${type}]`, error, metadata);
-  // Send to analytics service if available
-  if (typeof analyticsTrackError === 'function') {
-    analyticsTrackError(type, error, metadata);
-  }
-};
-
-const trackEvent = (eventName, data = {}) => {
-  console.log(`[${eventName}]`, data);
-  // Send to analytics service if available
-  if (typeof analyticsTrackEvent === 'function') {
-    analyticsTrackEvent(eventName, data);
-  }
-};
 
 /**
  * Email verification utility
@@ -52,13 +21,13 @@ const checkEmailVerification = (userData) => {
 };
 
 /**
- * AuthProvider Component
+ * AuthProvider Component - Optimized Implementation
  * 
  * ARCHITECTURAL REFACTORING: 
- * - Removed TOKEN_REFRESHED event processing from state updates
- * - Simplified onAuthStateChange to only process critical auth events
- * - Removed permission reloading on token refresh
- * - Established cleaner auth boundaries between state changes
+ * - Simplified initialization sequence with fault isolation
+ * - Eliminated SessionManager dependency with direct AppState monitoring
+ * - Removed permission fetching creating network dependencies
+ * - Implemented strategic token validation with lifecycle awareness
  */
 export const AuthProvider = ({ children }) => {
   // Authentication state
@@ -67,10 +36,12 @@ export const AuthProvider = ({ children }) => {
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [userPermissions, setUserPermissions] = useState([]);
   
   // Session restoration state
   const [sessionRestored, setSessionRestored] = useState(false);
+  
+  // AppState reference for transition management
+  const appState = React.useRef(AppState.currentState);
 
   /**
    * Navigation handler for successful verification
@@ -78,12 +49,6 @@ export const AuthProvider = ({ children }) => {
    */
   const handleSuccessfulVerification = useCallback(() => {
     console.log("Email verified successfully, initiating navigation transition");
-    
-    trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-      from_state: 'email_verified',
-      to_state: 'navigating',
-      timestamp: Date.now()
-    });
     
     // Validate navigation ref to prevent runtime errors
     if (navigationRef.isReady()) {
@@ -94,105 +59,14 @@ export const AuthProvider = ({ children }) => {
           routes: [{ name: 'Main' }],
         });
         console.log("Navigation successfully transitioned to Main route");
-        
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'navigating',
-          to_state: 'navigation_complete',
-          timestamp: Date.now()
-        });
       } catch (navError) {
         console.error("Navigation transition failed:", navError);
-        trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, navError, {
-          operation: 'navigation_transition',
-          critical: true
-        });
         // Graceful degradation - verification state will still be picked up by AppNavigator
       }
     } else {
       console.log("Navigation reference not ready, verification state will be handled by AppNavigator");
-      trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-        from_state: 'email_verified',
-        to_state: 'waiting_for_navigator',
-        timestamp: Date.now()
-      });
     }
   }, []);
-
-  /**
-   * Load user permissions from the database
-   * This is a critical operation that must execute after authentication
-   */
-  const loadUserPermissions = async (userId) => {
-    if (!userId) {
-      trackError(AUTH_ERROR_TYPES.AUTH_PERMISSION_ERROR, 
-        new Error("Attempted to load permissions with no userId"),
-        { critical: true });
-      return;
-    }
-    
-    try {
-      trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-        from_state: 'permissions_unloaded',
-        to_state: 'permissions_loading',
-        user_id: userId,
-        timestamp: Date.now()
-      });
-      
-      const { data, error } = await supabase
-        .from("user_permissions")
-        .select("*")
-        .eq("profile_id", userId)
-        .eq("active", true);
-        
-      if (error) {
-        trackError(AUTH_ERROR_TYPES.AUTH_PERMISSION_ERROR, error, {
-          operation: 'permissions_query',
-          user_id: userId
-        });
-        
-        // Critical change: Update state with empty permissions to prevent blocked UI
-        setUserPermissions([]);
-        
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'permissions_loading',
-          to_state: 'permissions_error',
-          user_id: userId,
-          timestamp: Date.now()
-        });
-        
-        return;
-      }
-      
-      console.log("Loaded permissions:", data?.length);
-      setUserPermissions(data || []);
-      
-      trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-        from_state: 'permissions_loading',
-        to_state: 'permissions_loaded',
-        permissions_count: data?.length || 0,
-        user_id: userId,
-        timestamp: Date.now()
-      });
-    } catch (err) {
-      trackError(AUTH_ERROR_TYPES.AUTH_PERMISSION_ERROR, err, {
-        operation: 'permissions_loading',
-        user_id: userId
-      });
-      
-      // Critical change: Update state with empty permissions to prevent blocked UI
-      setUserPermissions([]);
-    }
-  };
-
-  /**
-   * Permission checking utility
-   * Memoized for performance optimization
-   */
-  const hasPermission = useCallback((productId) => {
-    return userPermissions.some(
-      permission => permission.permission_id === productId && permission.active
-    );
-  }, [userPermissions]);
 
   /**
    * Deep link handler
@@ -202,18 +76,9 @@ export const AuthProvider = ({ children }) => {
     const url = event?.url || event;
     if (!url) return;
 
-    console.log("Received deep link:", url);
-    
     // Check if this is a verification callback URL
     if (url.startsWith("mygolfapp://login-callback")) {
       console.log("Processing verification deep link");
-      
-      trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-        from_state: 'deeplink_received',
-        to_state: 'processing_verification',
-        url: url,
-        timestamp: Date.now()
-      });
       
       try {
         // Refresh the auth state to get the updated verification status
@@ -221,10 +86,6 @@ export const AuthProvider = ({ children }) => {
         
         if (refreshError) {
           console.error("Error refreshing session:", refreshError);
-          trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, refreshError, {
-            operation: 'refresh_session',
-            url: url
-          });
           return;
         }
         
@@ -235,15 +96,7 @@ export const AuthProvider = ({ children }) => {
           const isVerified = checkEmailVerification(data.session.user);
           setEmailVerified(isVerified);
           
-          trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-            from_state: 'processing_verification',
-            to_state: isVerified ? 'verification_confirmed' : 'verification_pending',
-            timestamp: Date.now()
-          });
-          
-          // Load user permissions
-          await loadUserPermissions(data.session.user.id);
-          
+          // Handle verification state
           if (isVerified && pendingVerificationEmail) {
             console.log("Email verification confirmed - transitioning authentication state");
             // Clear pending verification state
@@ -256,123 +109,52 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (err) {
         console.error("Error processing verification link:", err);
-        trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, err, {
-          operation: 'process_verification_link',
-          url: url
-        });
       }
     }
   };
 
   /**
    * Authentication initialization and session restoration
-   * Instrumented with analytics and timeout protection
-   * 
-   * ARCHITECTURAL REFACTORING: 
-   * - Updated onAuthStateChange to only process SIGNED_IN and SIGNED_OUT events
-   * - Removed TOKEN_REFRESHED events from state update triggers
+   * Optimized with clean separation of concerns and proper fault isolation
    */
   useEffect(() => {
     const initAuth = async () => {
       try {
         setLoading(true);
         
-        // Start a timeout detector
-        const operationStart = Date.now();
-        const sessionTimeoutId = setTimeout(() => {
-          trackError(AUTH_ERROR_TYPES.AUTH_TIMEOUT_ERROR, 
-            new Error("Session restoration timed out after 10s"), 
-            { operation: 'session_restoration' });
-        }, 10000);
-        
-        // Track the start of auth initialization
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'uninitialized',
-          to_state: 'initializing',
-          timestamp: Date.now()
-        });
-        
         // Load pending verification email from storage first
-        const pendingEmail = await AsyncStorage.getItem('@GolfApp:pendingVerificationEmail');
-        if (pendingEmail) {
-          console.log("Found pending verification for:", pendingEmail);
-          setPendingVerificationEmail(pendingEmail);
-        }
-        
-        // Instrumented session restoration
-        const { data, error } = await supabase.auth.getSession();
-        
-        clearTimeout(sessionTimeoutId);
-        
-        if (error) {
-          trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, error, {
-            operation: 'session_restoration',
-            duration_ms: Date.now() - operationStart
-          });
-          
-          trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-            from_state: 'initializing',
-            to_state: 'failed',
-            failure_reason: 'session_error',
-            timestamp: Date.now()
-          });
-        } else if (data?.session?.user) {
-          trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-            from_state: 'initializing',
-            to_state: 'session_restored',
-            timestamp: Date.now()
-          });
-          
-          setUser(data.session.user);
-          setEmailVerified(checkEmailVerification(data.session.user));
-          
-          const permissionStart = Date.now();
-          const permissionTimeoutId = setTimeout(() => {
-            trackError(AUTH_ERROR_TYPES.AUTH_TIMEOUT_ERROR, 
-              new Error("Permission loading timed out after 8s"), 
-              { operation: 'permission_loading' });
-          }, 8000);
-          
-          try {
-            await loadUserPermissions(data.session.user.id);
-            await initAnalytics(data.session.user.id);
-            
-            clearTimeout(permissionTimeoutId);
-            
-            trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-              from_state: 'session_restored',
-              to_state: 'ready',
-              permission_load_time_ms: Date.now() - permissionStart,
-              timestamp: Date.now()
-            });
-          } catch (permError) {
-            clearTimeout(permissionTimeoutId);
-            
-            trackError(AUTH_ERROR_TYPES.AUTH_PERMISSION_ERROR, permError, {
-              operation: 'permission_loading',
-              user_id: data.session.user.id,
-              duration_ms: Date.now() - permissionStart
-            });
+        try {
+          const pendingEmail = await AsyncStorage.getItem('@GolfApp:pendingVerificationEmail');
+          if (pendingEmail) {
+            console.log("Found pending verification for:", pendingEmail);
+            setPendingVerificationEmail(pendingEmail);
           }
-        } else {
-          trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-            from_state: 'initializing',
-            to_state: 'no_session',
-            timestamp: Date.now()
-          });
+        } catch (storageError) {
+          console.error("Error reading pending verification:", storageError);
+          // Non-fatal error - continue initialization
         }
         
-        // Mark session restoration as complete
+        // Session restoration with fault isolation
+        try {
+          const { data, error } = await supabase.auth.getSession();
+          
+          if (error) {
+            console.error("Session restoration error:", error);
+          } else if (data?.session?.user) {
+            setUser(data.session.user);
+            setEmailVerified(checkEmailVerification(data.session.user));
+          }
+        } catch (sessionError) {
+          console.error("Session initialization error:", sessionError);
+          // Non-fatal error - continue with degraded capabilities
+        }
+        
+        // Mark session restoration as complete regardless of outcome
         setSessionRestored(true);
       } catch (err) {
-        trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, err, {
-          operation: 'session_initialization',
-          critical: true
-        });
-        
-        // Mark session restoration as complete to unblock UI
-        setSessionRestored(true);
+        console.error("Authentication initialization error:", err);
       } finally {
+        // Guarantee UI unblocking regardless of auth state
         setLoading(false);
       }
     };
@@ -381,56 +163,68 @@ export const AuthProvider = ({ children }) => {
     initAuth();
 
     /**
-     * Auth state change subscription
-     * 
-     * ARCHITECTURAL REFACTORING:
-     * - Only process SIGNED_IN and SIGNED_OUT events
-     * - Do not process TOKEN_REFRESHED events
-     * - Maintain auth event handling for critical auth transitions
+     * Auth state change subscription with explicit event filtering
+     * Only processes critical auth events, ignoring TOKEN_REFRESHED
      */
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("Auth state changed:", event);
       
-      // Check if event should be processed based on application context
-      if (!SessionManager.shouldProcessAuthEvent(event)) {
-        console.log(`[AuthContext] Auth event suppressed by SessionManager: ${event}`);
+      // Skip TOKEN_REFRESHED events to prevent render cascades
+      if (event === 'TOKEN_REFRESHED') {
         return;
       }
       
-      // Only process critical auth events - ignore TOKEN_REFRESHED
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'auth_change_detected',
-          to_state: session ? 'session_available' : 'session_removed',
-          auth_event: event,
-          timestamp: Date.now()
-        });
+      // Process critical authentication events
+      if (session?.user) {
+        setUser(session.user);
+        setEmailVerified(checkEmailVerification(session.user));
         
-        // Update internal state based on auth changes
-        if (session?.user) {
-          setUser(session.user);
-          setEmailVerified(checkEmailVerification(session.user));
+        // Handle verification state
+        if (checkEmailVerification(session.user) && pendingVerificationEmail) {
+          setPendingVerificationEmail(null);
+          await AsyncStorage.removeItem('@GolfApp:pendingVerificationEmail');
+        }
+      } else {
+        // Clear auth state on logout or session expiration
+        setUser(null);
+        setEmailVerified(false);
+      }
+    });
+
+    // Foreground transition handler with strategic token validation
+    const handleAppStateChange = async (nextAppState) => {
+      const previousState = appState.current;
+      appState.current = nextAppState;
+      
+      // Only validate when app returns to foreground
+      if (previousState.match(/inactive|background/) && nextAppState === 'active' && user?.id) {
+        console.log("App returned to foreground - validating authentication state");
+        
+        try {
+          // Lightweight session validation with non-blocking execution
+          const { data } = await supabase.auth.getSession();
           
-          // Initialize analytics with user ID
-          await initAnalytics(session.user.id);
-          
-          // Load user permissions
-          await loadUserPermissions(session.user.id);
-          
-          // Handle verification state
-          if (checkEmailVerification(session.user) && pendingVerificationEmail) {
-            setPendingVerificationEmail(null);
-            await AsyncStorage.removeItem('@GolfApp:pendingVerificationEmail');
+          // If token is nearing expiry, perform proactive refresh
+          if (data?.session?.expires_at) {
+            const expiryTime = new Date(data.session.expires_at).getTime();
+            const currentTime = Date.now();
+            const remainingMs = expiryTime - currentTime;
+            
+            // If less than 30 minutes remaining, refresh token
+            if (remainingMs < 30 * 60 * 1000) {
+              console.log("Token nearing expiry, performing proactive refresh");
+              await supabase.auth.refreshSession();
+            }
           }
-        } else {
-          // Clear auth state on logout or session expiration
-          setUser(null);
-          setEmailVerified(false);
-          setUserPermissions([]);
+        } catch (validationError) {
+          console.error("Foreground validation error:", validationError);
+          // Non-fatal error - continue with current session
         }
       }
-      // Explicitly ignore TOKEN_REFRESHED events - do not update state
-    });
+    };
+    
+    // Set up AppState monitoring
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     // Deep link handling setup
     Linking.getInitialURL().then(url => {
@@ -438,29 +232,22 @@ export const AuthProvider = ({ children }) => {
     });
     const linkingListener = Linking.addEventListener('url', handleDeepLink);
 
-    // Cleanup resources on unmount
+    // Cleanup resources on unmount with proper lifecycle management
     return () => {
       if (authListener?.subscription) {
         authListener.subscription.unsubscribe();
       }
+      appStateSubscription.remove();
       linkingListener.remove();
-      SessionManager.cleanup();
     };
-  }, [pendingVerificationEmail, handleSuccessfulVerification, emailVerified, user]);
+  }, [pendingVerificationEmail, handleSuccessfulVerification, user?.id]);
 
   /**
-   * Enhanced sign-in implementation
-   * Leverages persistence layer automatically through supabase client
+   * Enhanced sign-in implementation with clean error boundaries
    */
   const signIn = async (email, password) => {
     setLoading(true);
     setError(null);
-    
-    trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-      from_state: 'unauthenticated',
-      to_state: 'signin_initiated',
-      timestamp: Date.now()
-    });
     
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ 
@@ -470,43 +257,103 @@ export const AuthProvider = ({ children }) => {
       
       if (error) {
         setError(error.message);
-        
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'signin_initiated',
-          to_state: 'signin_failed',
-          error_code: error.code,
-          timestamp: Date.now()
-        });
+        return { success: false, error: error.message };
       } else {
-        // Session will be automatically persisted by the enhanced supabase client
+        // Session will be automatically persisted by the supabase client
         setUser(data.user);
         setEmailVerified(checkEmailVerification(data.user));
-        
-        trackEvent(AUTH_EVENTS.AUTH_STATE_TRANSITION, {
-          from_state: 'signin_initiated',
-          to_state: 'signin_success',
-          timestamp: Date.now()
-        });
-        
-        await loadUserPermissions(data.user.id);
+        return { success: true };
       }
     } catch (err) {
       setError("An unexpected error occurred during sign in.");
       console.error("SignIn error:", err);
-      
-      trackError(AUTH_ERROR_TYPES.AUTH_SESSION_ERROR, err, {
-        operation: 'sign_in',
-        email: email ? email.substring(0, 3) + '...' : undefined // Partial email for privacy
-      });
+      return { success: false, error: err.message };
     } finally {
       setLoading(false);
     }
   };
 
-  /* The rest of the auth methods remain unchanged */
-  // ...
+  /**
+   * Sign-up implementation with pending verification handling
+   */
+  const signUp = async (email, password) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      
+      if (error) {
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+      
+      // Store email for verification flow
+      await AsyncStorage.setItem('@GolfApp:pendingVerificationEmail', email);
+      setPendingVerificationEmail(email);
+      
+      return { success: true };
+    } catch (err) {
+      setError("An unexpected error occurred during sign up.");
+      console.error("SignUp error:", err);
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Expose auth context to the application
+  /**
+   * Clean sign-out implementation
+   */
+  const signOut = async () => {
+    try {
+      setLoading(true);
+      await supabase.auth.signOut();
+      return { success: true };
+    } catch (err) {
+      console.error("Sign out error:", err);
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Email verification resend with proper error handling
+   */
+  const resendVerificationEmail = async () => {
+    try {
+      setLoading(true);
+      
+      if (!pendingVerificationEmail) {
+        setError("No email to verify");
+        return { success: false, error: "No email to verify" };
+      }
+      
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: pendingVerificationEmail
+      });
+      
+      if (error) {
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+      
+      return { success: true };
+    } catch (err) {
+      setError("Failed to resend verification email");
+      console.error("Verification resend error:", err);
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Expose auth context to the application with clean interface contracts
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -519,10 +366,8 @@ export const AuthProvider = ({ children }) => {
       emailVerified,
       pendingVerificationEmail,
       resendVerificationEmail,
-      userPermissions,
-      hasPermission,
-      sessionRestored, // Session restoration flag
-      navigateAfterVerification: handleSuccessfulVerification // Navigation capability
+      sessionRestored,
+      navigateAfterVerification: handleSuccessfulVerification
     }}>
       {children}
     </AuthContext.Provider>

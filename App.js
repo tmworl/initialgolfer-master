@@ -8,10 +8,13 @@ import { AuthProvider, navigationRef } from "./src/context/AuthContext";
 /**
  * Root application component
  * 
- * Establishes simplified system architecture:
+ * Establishes the core architecture layers:
  * 1. Authentication state management (AuthProvider)
  * 2. Navigation infrastructure (NavigationContainer)
  * 3. Route structure definition (AppNavigator)
+ * 
+ * The navigationRef binding creates a bridge between the authentication
+ * domain and navigation capabilities without introducing tight coupling.
  */
 export default function App() {
   return (

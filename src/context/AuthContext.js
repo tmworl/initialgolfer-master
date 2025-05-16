@@ -2,9 +2,10 @@
 
 import React, { createContext, useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Linking, AppState } from "react-native";
+import { Linking } from "react-native";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { supabase } from "../services/supabase";
+import { initAnalytics } from "../services/analytics";
 
 // Create navigation reference for cross-component navigation capabilities
 export const navigationRef = createNavigationContainerRef();
@@ -21,13 +22,11 @@ const checkEmailVerification = (userData) => {
 };
 
 /**
- * AuthProvider Component - Optimized Implementation
+ * AuthProvider Component
  * 
- * ARCHITECTURAL REFACTORING: 
- * - Simplified initialization sequence with fault isolation
- * - Eliminated SessionManager dependency with direct AppState monitoring
- * - Removed permission fetching creating network dependencies
- * - Implemented strategic token validation with lifecycle awareness
+ * Enhanced with persistence capabilities, this provider maintains the user's
+ * authentication state across app restarts while preserving all existing
+ * functionality including email verification flows.
  */
 export const AuthProvider = ({ children }) => {
   // Authentication state
@@ -36,12 +35,10 @@ export const AuthProvider = ({ children }) => {
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [userPermissions, setUserPermissions] = useState([]);
   
   // Session restoration state
   const [sessionRestored, setSessionRestored] = useState(false);
-  
-  // AppState reference for transition management
-  const appState = React.useRef(AppState.currentState);
 
   /**
    * Navigation handler for successful verification
@@ -69,6 +66,44 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
+   * Load user permissions from the database
+   * This is a critical operation that must execute after authentication
+   */
+  const loadUserPermissions = async (userId) => {
+    if (!userId) return;
+    
+    try {
+      console.log("Loading permissions for user:", userId);
+      
+      const { data, error } = await supabase
+        .from("user_permissions")
+        .select("*")
+        .eq("profile_id", userId)
+        .eq("active", true);
+        
+      if (error) {
+        console.error("Error loading user permissions:", error);
+        return;
+      }
+      
+      console.log("Loaded permissions:", data?.length);
+      setUserPermissions(data || []);
+    } catch (err) {
+      console.error("Exception loading user permissions:", err);
+    }
+  };
+
+  /**
+   * Permission checking utility
+   * Memoized for performance optimization
+   */
+  const hasPermission = useCallback((productId) => {
+    return userPermissions.some(
+      permission => permission.permission_id === productId && permission.active
+    );
+  }, [userPermissions]);
+
+  /**
    * Deep link handler
    * Process verification callbacks from email links
    */
@@ -76,6 +111,8 @@ export const AuthProvider = ({ children }) => {
     const url = event?.url || event;
     if (!url) return;
 
+    console.log("Received deep link:", url);
+    
     // Check if this is a verification callback URL
     if (url.startsWith("mygolfapp://login-callback")) {
       console.log("Processing verification deep link");
@@ -96,7 +133,9 @@ export const AuthProvider = ({ children }) => {
           const isVerified = checkEmailVerification(data.session.user);
           setEmailVerified(isVerified);
           
-          // Handle verification state
+          // Load user permissions
+          await loadUserPermissions(data.session.user.id);
+          
           if (isVerified && pendingVerificationEmail) {
             console.log("Email verification confirmed - transitioning authentication state");
             // Clear pending verification state
@@ -115,46 +154,52 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Authentication initialization and session restoration
-   * Optimized with clean separation of concerns and proper fault isolation
+   * 
+   * This enhanced implementation leverages the persistent storage layer
+   * while maintaining the existing verification state management.
    */
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // Maintain loading state for UI feedback
         setLoading(true);
         
         // Load pending verification email from storage first
-        try {
-          const pendingEmail = await AsyncStorage.getItem('@GolfApp:pendingVerificationEmail');
-          if (pendingEmail) {
-            console.log("Found pending verification for:", pendingEmail);
-            setPendingVerificationEmail(pendingEmail);
-          }
-        } catch (storageError) {
-          console.error("Error reading pending verification:", storageError);
-          // Non-fatal error - continue initialization
+        // This ensures unverified users maintain proper UX across restarts
+        const pendingEmail = await AsyncStorage.getItem('@GolfApp:pendingVerificationEmail');
+        if (pendingEmail) {
+          console.log("Found pending verification for:", pendingEmail);
+          setPendingVerificationEmail(pendingEmail);
         }
         
-        // Session restoration with fault isolation
-        try {
-          const { data, error } = await supabase.auth.getSession();
+        // Check for existing session with enhanced error handling
+        // The Supabase client is now configured to restore from AsyncStorage
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Session restoration error:", error);
+          // Continue execution to allow fallback authentication options
+        } else if (data?.session?.user) {
+          console.log("Session restored for user:", data.session.user.email);
           
-          if (error) {
-            console.error("Session restoration error:", error);
-          } else if (data?.session?.user) {
-            setUser(data.session.user);
-            setEmailVerified(checkEmailVerification(data.session.user));
-          }
-        } catch (sessionError) {
-          console.error("Session initialization error:", sessionError);
-          // Non-fatal error - continue with degraded capabilities
+          // Update auth state with restored session
+          setUser(data.session.user);
+          setEmailVerified(checkEmailVerification(data.session.user));
+          
+          // Load user permissions on session restoration
+          await loadUserPermissions(data.session.user.id);
+          await initAnalytics(data.session.user.id); // Initialize analytics on session restore
+        } else {
+          console.log("No active session found in storage");
         }
         
         // Mark session restoration as complete regardless of outcome
         setSessionRestored(true);
       } catch (err) {
-        console.error("Authentication initialization error:", err);
+        console.error("Critical error in authentication initialization:", err);
+        // Mark session restoration as complete to unblock UI
+        setSessionRestored(true);
       } finally {
-        // Guarantee UI unblocking regardless of auth state
         setLoading(false);
       }
     };
@@ -163,21 +208,27 @@ export const AuthProvider = ({ children }) => {
     initAuth();
 
     /**
-     * Auth state change subscription with explicit event filtering
-     * Only processes critical auth events, ignoring TOKEN_REFRESHED
+     * Auth state change subscription
+     * 
+     * This synchronizes the UI with auth state changes from any source:
+     * - Manual login/logout
+     * - Session restoration
+     * - Token refresh
+     * - External auth events (deep links)
      */
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("Auth state changed:", event);
       
-      // Skip TOKEN_REFRESHED events to prevent render cascades
-      if (event === 'TOKEN_REFRESHED') {
-        return;
-      }
-      
-      // Process critical authentication events
+      // Update internal state based on auth changes
       if (session?.user) {
         setUser(session.user);
         setEmailVerified(checkEmailVerification(session.user));
+        
+        // Initialize analytics with user ID
+        await initAnalytics(session.user.id);
+        
+        // Load user permissions
+        await loadUserPermissions(session.user.id);
         
         // Handle verification state
         if (checkEmailVerification(session.user) && pendingVerificationEmail) {
@@ -188,43 +239,9 @@ export const AuthProvider = ({ children }) => {
         // Clear auth state on logout or session expiration
         setUser(null);
         setEmailVerified(false);
+        setUserPermissions([]);
       }
     });
-
-    // Foreground transition handler with strategic token validation
-    const handleAppStateChange = async (nextAppState) => {
-      const previousState = appState.current;
-      appState.current = nextAppState;
-      
-      // Only validate when app returns to foreground
-      if (previousState.match(/inactive|background/) && nextAppState === 'active' && user?.id) {
-        console.log("App returned to foreground - validating authentication state");
-        
-        try {
-          // Lightweight session validation with non-blocking execution
-          const { data } = await supabase.auth.getSession();
-          
-          // If token is nearing expiry, perform proactive refresh
-          if (data?.session?.expires_at) {
-            const expiryTime = new Date(data.session.expires_at).getTime();
-            const currentTime = Date.now();
-            const remainingMs = expiryTime - currentTime;
-            
-            // If less than 30 minutes remaining, refresh token
-            if (remainingMs < 30 * 60 * 1000) {
-              console.log("Token nearing expiry, performing proactive refresh");
-              await supabase.auth.refreshSession();
-            }
-          }
-        } catch (validationError) {
-          console.error("Foreground validation error:", validationError);
-          // Non-fatal error - continue with current session
-        }
-      }
-    };
-    
-    // Set up AppState monitoring
-    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     // Deep link handling setup
     Linking.getInitialURL().then(url => {
@@ -232,23 +249,22 @@ export const AuthProvider = ({ children }) => {
     });
     const linkingListener = Linking.addEventListener('url', handleDeepLink);
 
-    // Cleanup resources on unmount with proper lifecycle management
+    // Cleanup resources on unmount
     return () => {
       if (authListener?.subscription) {
         authListener.subscription.unsubscribe();
       }
-      appStateSubscription.remove();
       linkingListener.remove();
     };
-  }, [pendingVerificationEmail, handleSuccessfulVerification, user?.id]);
+  }, [pendingVerificationEmail, handleSuccessfulVerification]);
 
   /**
-   * Enhanced sign-in implementation with clean error boundaries
+   * Enhanced sign-in implementation
+   * Leverages persistence layer automatically through supabase client
    */
   const signIn = async (email, password) => {
     setLoading(true);
     setError(null);
-    
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ 
         email, 
@@ -257,103 +273,130 @@ export const AuthProvider = ({ children }) => {
       
       if (error) {
         setError(error.message);
-        return { success: false, error: error.message };
       } else {
-        // Session will be automatically persisted by the supabase client
+        // Session will be automatically persisted by the enhanced supabase client
         setUser(data.user);
         setEmailVerified(checkEmailVerification(data.user));
-        return { success: true };
+        await loadUserPermissions(data.user.id);
       }
     } catch (err) {
       setError("An unexpected error occurred during sign in.");
       console.error("SignIn error:", err);
-      return { success: false, error: err.message };
     } finally {
       setLoading(false);
     }
   };
 
   /**
-   * Sign-up implementation with pending verification handling
+   * Sign-up implementation
+   * Creates account and manages verification state
    */
   const signUp = async (email, password) => {
     setLoading(true);
     setError(null);
-    
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: "mygolfapp://login-callback"
+        }
       });
       
       if (error) {
-        setError(error.message);
-        return { success: false, error: error.message };
+        if (error.message.includes("already registered") || error.code === "23505") {
+          setError("This email is already registered. Please sign in instead.");
+        } else {
+          setError(error.message);
+        }
+      } else {
+        // Store user but flag as unverified
+        setUser(data.user);
+        setEmailVerified(false);
+        
+        // Store pending verification email
+        setPendingVerificationEmail(email);
+        await AsyncStorage.setItem('@GolfApp:pendingVerificationEmail', email);
       }
-      
-      // Store email for verification flow
-      await AsyncStorage.setItem('@GolfApp:pendingVerificationEmail', email);
-      setPendingVerificationEmail(email);
-      
-      return { success: true };
     } catch (err) {
       setError("An unexpected error occurred during sign up.");
       console.error("SignUp error:", err);
-      return { success: false, error: err.message };
     } finally {
       setLoading(false);
     }
   };
 
   /**
-   * Clean sign-out implementation
+   * Verification email resend functionality
    */
-  const signOut = async () => {
+  const resendVerificationEmail = async (email = null) => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      await supabase.auth.signOut();
-      return { success: true };
-    } catch (err) {
-      console.error("Sign out error:", err);
-      return { success: false, error: err.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Email verification resend with proper error handling
-   */
-  const resendVerificationEmail = async () => {
-    try {
-      setLoading(true);
+      const emailToVerify = email || pendingVerificationEmail;
       
-      if (!pendingVerificationEmail) {
-        setError("No email to verify");
-        return { success: false, error: "No email to verify" };
+      if (!emailToVerify) {
+        setError("No email address to verify");
+        return;
       }
       
       const { error } = await supabase.auth.resend({
         type: 'signup',
-        email: pendingVerificationEmail
+        email: emailToVerify,
+        options: {
+          emailRedirectTo: "mygolfapp://login-callback"
+        }
       });
       
       if (error) {
         setError(error.message);
-        return { success: false, error: error.message };
+      } else if (email && email !== pendingVerificationEmail) {
+        setPendingVerificationEmail(email);
+        await AsyncStorage.setItem('@GolfApp:pendingVerificationEmail', email);
       }
-      
-      return { success: true };
     } catch (err) {
       setError("Failed to resend verification email");
-      console.error("Verification resend error:", err);
-      return { success: false, error: err.message };
+      console.error("Resend verification error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Expose auth context to the application with clean interface contracts
+  /**
+   * Enhanced sign-out with complete persistence cleanup
+   * 
+   * This implementation ensures that all persisted authentication data
+   * is properly cleared during logout, preventing session leakage.
+   */
+  const signOut = async () => {
+    setLoading(true);
+    try {
+      // The enhanced supabase client will automatically clear persisted session
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        setError(error.message);
+      } else {
+        // Clear all auth-related state
+        setUser(null);
+        setEmailVerified(false);
+        setPendingVerificationEmail(null);
+        setUserPermissions([]);
+        
+        // Clear any app-specific storage
+        await AsyncStorage.removeItem('@GolfApp:pendingVerificationEmail');
+        
+        console.log("Session terminated and storage cleared");
+      }
+    } catch (err) {
+      setError("Failed to sign out");
+      console.error("SignOut error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Expose auth context to the application
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -366,8 +409,10 @@ export const AuthProvider = ({ children }) => {
       emailVerified,
       pendingVerificationEmail,
       resendVerificationEmail,
-      sessionRestored,
-      navigateAfterVerification: handleSuccessfulVerification
+      userPermissions,
+      hasPermission,
+      sessionRestored, // Session restoration flag
+      navigateAfterVerification: handleSuccessfulVerification // Navigation capability
     }}>
       {children}
     </AuthContext.Provider>

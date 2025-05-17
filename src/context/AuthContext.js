@@ -2,7 +2,7 @@
 
 import React, { createContext, useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Linking } from "react-native";
+import { Linking, AppState } from "react-native";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { supabase } from "../services/supabase";
 import { initAnalytics } from "../services/analytics";
@@ -39,6 +39,9 @@ export const AuthProvider = ({ children }) => {
   
   // Session restoration state
   const [sessionRestored, setSessionRestored] = useState(false);
+  
+  // AppState tracking for background/foreground transitions
+  const [appState, setAppState] = useState(AppState.currentState);
 
   /**
    * Navigation handler for successful verification
@@ -153,6 +156,53 @@ export const AuthProvider = ({ children }) => {
   };
 
   /**
+   * Token refresh function
+   * Used to proactively refresh the authentication token
+   */
+  const refreshAuthToken = async () => {
+    if (!user) return false;
+    
+    try {
+      console.log("Proactively refreshing authentication token");
+      const { data, error } = await supabase.auth.refreshSession();
+      
+      if (error) {
+        console.warn("Token refresh failed:", error);
+        return false;
+      }
+      
+      if (data?.session) {
+        console.log("Token refreshed successfully");
+        // No need to update user state as the auth listener will handle that
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      console.error("Exception during token refresh:", e);
+      return false;
+    }
+  };
+
+  /**
+   * App state change handler
+   * Manages token refresh on app foregrounding
+   */
+  const handleAppStateChange = useCallback(async (nextAppState) => {
+    // Only care about transitions from background to active (foregrounding)
+    const isForegrounding = appState.match(/inactive|background/) && nextAppState === 'active';
+    
+    // Update stored app state
+    setAppState(nextAppState);
+    
+    // Handle app foregrounding with authenticated user
+    if (isForegrounding && user) {
+      console.log("App foregrounded, refreshing authentication token");
+      await refreshAuthToken();
+    }
+  }, [appState, user]);
+
+  /**
    * Authentication initialization and session restoration
    * 
    * This enhanced implementation leverages the persistent storage layer
@@ -248,6 +298,9 @@ export const AuthProvider = ({ children }) => {
       if (url) handleDeepLink(url);
     });
     const linkingListener = Linking.addEventListener('url', handleDeepLink);
+    
+    // App state listener for foregrounding token refresh
+    const appStateListener = AppState.addEventListener('change', handleAppStateChange);
 
     // Cleanup resources on unmount
     return () => {
@@ -255,8 +308,9 @@ export const AuthProvider = ({ children }) => {
         authListener.subscription.unsubscribe();
       }
       linkingListener.remove();
+      appStateListener.remove();
     };
-  }, [pendingVerificationEmail, handleSuccessfulVerification]);
+  }, [pendingVerificationEmail, handleSuccessfulVerification, handleAppStateChange]);
 
   /**
    * Enhanced sign-in implementation
@@ -396,7 +450,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Expose auth context to the application
+  // Expose auth context to the application including token refresh capability
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -412,7 +466,8 @@ export const AuthProvider = ({ children }) => {
       userPermissions,
       hasPermission,
       sessionRestored, // Session restoration flag
-      navigateAfterVerification: handleSuccessfulVerification // Navigation capability
+      navigateAfterVerification: handleSuccessfulVerification, // Navigation capability
+      refreshAuthToken // Expose token refresh function for direct use
     }}>
       {children}
     </AuthContext.Provider>

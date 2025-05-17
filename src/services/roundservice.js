@@ -180,6 +180,24 @@ export const completeRound = async (round_id) => {
   const context = { round_id };
   
   try {
+    // FIRST THING: Refresh the authentication token before proceeding
+    // This ensures we have a fresh token for the entire completion process
+    console.log("[completeRound] Refreshing authentication token...");
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    
+    if (refreshError) {
+      console.warn("[completeRound] Token refresh warning, proceeding with current token:", refreshError);
+      // Continue with operation - the current token might still be valid
+      // Track the refresh attempt failure for monitoring
+      await trackError(ERROR_TYPES.DATA_PERSISTENCE_ERROR, refreshError, {
+        ...context,
+        error_stage: 'token_refresh',
+        operation_duration_ms: Date.now() - startTime
+      });
+    } else {
+      console.log("[completeRound] Token refreshed successfully");
+    }
+    
     // Fetch round data
     const { data: roundData, error: roundError } = await supabase
       .from("rounds")

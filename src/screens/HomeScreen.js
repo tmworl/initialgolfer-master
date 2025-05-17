@@ -12,6 +12,7 @@ import { getLatestInsights } from "../services/insightsService";
 import Typography from "../ui/components/Typography";
 import Button from "../ui/components/Button";
 import Card from "../ui/components/Card";
+import { DiagnosticPanel } from '../components/ArchitectureDiagnostic';
 
 /**
  * HomeScreen Component
@@ -159,6 +160,7 @@ export default function HomeScreen({ navigation }) {
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={true}
       >
+        <DiagnosticPanel />
         <View style={styles.container}>
           {/* Primary Monetization Surface: Insights Card */}
           <InsightCard
